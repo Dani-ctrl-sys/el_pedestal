@@ -1,0 +1,38 @@
+# ==============================================================================
+# .gitignore — el_pedestal
+# ==============================================================================
+
+# Artefactos de compilación
+build/
+*.o
+*.a
+*.so
+*.out
+
+# Ejecutables (Linux/macOS sin extensión, Windows con .exe)
+*.exe
+
+# Archivos de editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db
+desktop.ini
+
+# Dependencias externas descargadas localmente
+lib/
+vendor/
+
+# Archivos de cobertura y análisis estático
+*.gcda
+*.gcno
+*.gcov
+callgrind.out.*
+valgrind-*.log
