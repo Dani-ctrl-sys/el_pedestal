@@ -6,5 +6,6 @@
 #define Q 8380417
 
 int32_t conditional_subq(int32_t a);
+int32_t caddq(int32_t a);
 
 #endif
