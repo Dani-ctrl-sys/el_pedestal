@@ -22,3 +22,13 @@ int32_t caddq(int32_t a) {
     int32_t mask = a >> 31;
     return a + (Q & mask);
 }
+
+int32_t montgomery_reduce(int64_t a) {
+    // Paso 1: Truncamiento (multiplicar solo los 32 bits inferiores por QINV)
+    int32_t t = (int32_t)a * QINV;
+    
+    // Pasos 2, 3 y 4: Expansión a 64 bits, cancelación y división rápida por 2^32
+    int32_t res = (int32_t)((a - (int64_t)t * Q) >> 32);
+    
+    return res;
+}
