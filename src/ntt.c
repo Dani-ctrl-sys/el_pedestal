@@ -1,5 +1,5 @@
 #include "ntt.h"
-
+#include "arithmetic.h"
 
 const int32_t zetas[256] = {
     4193792, // Indice real: 0, Potencia original: 0
@@ -259,3 +259,37 @@ const int32_t zetas[256] = {
     7534263, // Indice real: 254, Potencia original: 127
     1976782 // Indice real: 255, Potencia original: 255
 };
+
+extern int32_t montgomery_reduce(int64_t a); 
+
+void poly_ntt(int32_t a[256]) {
+    unsigned int len, start, j, k;
+    int32_t zeta, t;
+
+    k = 1; // Índice secuencial para leer las zetas de la memoria Flash
+
+    // Bucle 1: Las 8 capas (Controla la distancia de la mariposa)
+    for (len = 128; len >= 1; len >>= 1) { 
+        
+        // Bucle 2: Recorre los diferentes bloques independientes en la capa actual
+        for (start = 0; start < 256; start = j + len) { 
+            
+            // Leemos el factor W (la hora del reloj pre-desordenada)
+            zeta = zetas[k++]; 
+            
+            // Bucle 3: La operación Mariposa (El cálculo matemático puro)
+            for (j = start; j < start + len; ++j) { 
+                
+                // 1. Producto temporal (t = Abajo * W)
+                // Hacemos cast a 64 bits para que la multiplicación no desborde antes de reducir
+                t = montgomery_reduce((int64_t)zeta * a[j + len]); 
+                
+                // 2. Nuevo Abajo = Arriba - t
+                a[j + len] = a[j] - t; 
+                
+                // 3. Nuevo Arriba = Arriba + t
+                a[j] = a[j] + t; 
+            }
+        }
+    }
+}
