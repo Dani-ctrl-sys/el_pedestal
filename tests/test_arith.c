@@ -1,5 +1,7 @@
 #include <stdio.h>
 #include "arithmetic.h"
+#include <stdint.h>
+#include "ntt.h"
 
 int main(void) {
     // Prueba 1: Valor validado sin requisito de reducción (a < Q).
@@ -57,4 +59,42 @@ int main(void) {
     }
 
     return 0;
+}
+
+int test_ntt_integridad(void) {
+    int32_t a[256];
+    int32_t a_orig[256];
+    int i;
+    int errores = 0;
+
+    // 1. Inyección de datos controlados
+    for(i = 0; i < 256; i++) {
+        a[i] = i;          // Patrón de prueba lineal simple
+        a_orig[i] = a[i];  // Copia de seguridad intacta
+    }
+
+    // 2. Ida: Entrar al dominio NTT
+    poly_ntt(a);
+
+    // 3. Vuelta: Salir del dominio NTT
+    poly_invntt(a);
+
+    // 4. Auditoría de memoria
+    for(i = 0; i < 256; i++) {
+        // La resta modular puede dejar el valor desplazado por un múltiplo de Q.
+        // En un entorno riguroso, comprobamos la congruencia, pero para números 
+        // pequeños iniciales, la recuperación debería ser exacta.
+        if(a[i] != a_orig[i]) {
+            printf("[ERROR] Indice %d corrupto. Esperado: %d, Obtenido: %d\n", i, a_orig[i], a[i]);
+            errores++;
+        }
+    }
+
+    if(errores == 0) {
+        printf("[EXITO] La cadena NTT -> INTT es matematicamente hermetica.\n");
+        return 0; // Pasa el test
+    } else {
+        printf("[FALLO] Se detectaron %d errores de reconstruccion.\n", errores);
+        return -1; // Falla el test
+    }
 }

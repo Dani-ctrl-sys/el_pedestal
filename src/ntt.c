@@ -293,3 +293,42 @@ void poly_ntt(int32_t a[256]) {
         }
     }
 }
+
+void poly_mul_pointwise(int32_t c[256], const int32_t a[256], const int32_t b[256]) {
+    unsigned int i;
+    for (i = 0; i < 256; ++i) {
+        // Multiplicación escalar de 64 bits y reducción al dominio acotado de 32 bits
+        c[i] = montgomery_reduce((int64_t)a[i] * b[i]);
+    }
+}
+
+void poly_invntt(int32_t a[256]) {
+    unsigned int len, start, j, k;
+    int32_t zeta, t;
+
+    k = 255; // Se recorre el árbol desde las hojas hacia la raíz
+
+    // 1. El árbol invertido: len empieza en 1 y se multiplica por 2
+    for (len = 1; len < 256; len <<= 1) { 
+        for (start = 0; start < 256; start = j + len) { 
+            // 2. Lectura inversa de constantes (se invierte el signo/ángulo)
+            zeta = -zetas[k--]; 
+            
+            for (j = start; j < start + len; ++j) { 
+                t = a[j];
+                
+                // 3. La Mariposa Inversa (Suma y resta ANTES de multiplicar)
+                a[j] = caddq(t + a[j + len]); 
+                a[j + len] = t - a[j + len]; 
+                a[j + len] = montgomery_reduce((int64_t)zeta * a[j + len]); 
+            }
+        }
+    }
+
+    // 4. Factor de escala final (Multiplicar por 1/256)
+    // El valor 41978 es N^{-1} (1/256) en dominio Montgomery para Q = 8380417
+    const int32_t f = 41978; 
+    for (j = 0; j < 256; j++) {
+        a[j] = montgomery_reduce((int64_t)a[j] * f);
+    }
+}
