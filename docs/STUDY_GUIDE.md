@@ -772,7 +772,9 @@ Si `w^256 = -1`, entonces `w^512 = (-1)^2 = 1`. Pero `w^256 ≠ 1`. Por tanto, `
 
 ### ¿Por qué Z_Q[X] / (X^256 + 1) y no (X^256 - 1)?
 
-Porque el anillo `Z_Q[X] / (X^256 + 1)` es el anillo de polinomios **ciclotómico** que ML-DSA necesita para la seguridad del esquema lattice-based. El polinomio `X^256 + 1` es irreducible sobre `Z` (es el polinomio ciclotómico `Φ₅₁₂(X)`), lo que da al anillo propiedades algebraicas especiales necesarias para las pruebas de seguridad del esquema.
+Porque el anillo `Z_Q[X] / (X^256 + 1)` es el anillo de polinomios **ciclotómico** que ML-DSA necesita para la seguridad del esquema lattice-based.
+
+> **¿Qué significa "ciclotómico"?** La palabra viene del griego *kyklos* (círculo) + *temnein* (cortar). Un **polinomio ciclotómico** `Φₙ(X)` es el polinomio mínimo cuyas raíces son las raíces primitivas *n*-ésimas de la unidad. En nuestro caso, `X^256 + 1 = Φ₅₁₂(X)`: sus raíces complejas son exactamente las raíces primitivas 512-ésimas de la unidad. El hecho de que `Φ₅₁₂(X)` sea irreducible sobre los enteros (`Z`) garantiza que el anillo `Z_Q[X] / (Φ₅₁₂(X))` tenga la estructura algebraica "rígida" necesaria para que los problemas de retículas (*lattice problems*) sobre los que se basa ML-DSA sean demostrablemente difíciles.
 
 ### La constante ζ = 1753
 
@@ -974,6 +976,43 @@ Total = 1024 × 3 = 3072 operaciones aritméticas
 
 Esto es un orden de magnitud menos que las `65 536` de la multiplicación directa.
 
+### Ejemplo numérico concreto: NTT de 4 elementos
+
+Para anclar la intuición, vamos a caminar por una NTT simplificada de **4 elementos** (N=4, 2 capas). Los principios son idénticos a la de 256 elementos, solo que más pequeños.
+
+**Datos de entrada:** `a = [1, 2, 3, 4]`
+
+**Capa 0 (len=2, 1 bloque, zeta = ζ^2):**
+```
+Butterfly(a[0], a[2], ζ²):  t = ζ² · a[2] = ζ² · 3
+    a[0]' = a[0] + t = 1 + ζ²·3
+    a[2]' = a[0] - t = 1 - ζ²·3
+
+Butterfly(a[1], a[3], ζ²):  t = ζ² · a[3] = ζ² · 4
+    a[1]' = a[1] + t = 2 + ζ²·4
+    a[3]' = a[1] - t = 2 - ζ²·4
+```
+
+**Capa 1 (len=1, 2 bloques):**
+```
+Bloque 0 (zeta = ζ¹):
+    Butterfly(a[0]', a[1]', ζ¹):  t = ζ¹ · a[1]'
+        â[0] = a[0]' + t
+        â[1] = a[0]' - t
+
+Bloque 1 (zeta = ζ³):
+    Butterfly(a[2]', a[3]', ζ³):  t = ζ³ · a[3]'
+        â[2] = a[2]' + t
+        â[3] = a[2]' - t
+```
+
+**Observa el patrón:**
+- Capa 0: **un solo** zeta compartido entre todas las butterflies (distancia larga entre pares).
+- Capa 1: **dos** zetas distintos, uno por bloque (distancia corta entre pares).
+- Los zetas se leen en orden: `k=1 → ζ², k=2 → ζ¹, k=3 → ζ³` — exactamente el orden bit-reversal.
+
+Este mismo patrón, escalado a 8 capas y 128 butterflies por capa, es lo que ocurre en la NTT de 256 elementos de `el_pedestal`.
+
 ---
 
 ## 15. La NTT inversa (INTT)
@@ -1023,18 +1062,41 @@ Porque la multiplicación final se hace **a través de** `montgomery_reduce`:
 a[j] = montgomery_reduce((int64_t)a[j] * f);
 ```
 
-Esto computa `a[j] · f · R⁻¹ mod Q` (donde `R = 2^32`). Queremos que el resultado sea `a[j] · N⁻¹ mod Q`. Para que ambas cosas coincidan:
+Esto computa `a[j] · f · R⁻¹ mod Q` (donde `R = 2^32`). Queremos que el resultado sea `a[j] · N⁻¹ mod Q`. Pero hay que rastrear **exactamente** de dónde vienen los factores de `R`.
+
+### Tracking preciso de los factores R (paso a paso)
+
+Rastreemos el factor `R` que acompaña a un coeficiente en cada etapa del flujo `NTT → pointwise → INTT`:
 
 ```
-f · R⁻¹ ≡ N⁻¹  (mod Q)
-f ≡ N⁻¹ · R     (mod Q)
+Paso 1: poly_ntt(a)
+  Cada butterfly: montgomery_reduce(zeta_mont · b) = (ζ·R · b) / R = ζ·b
+  → Los R se cancelan. Tras la NTT, los coeficientes NO tienen factor R.
+  → Estado del coeficiente: â[i]  (sin R)
+
+Paso 2: poly_mul_pointwise(c, a, b)
+  c[i] = montgomery_reduce(â[i] · b̂[i]) = â[i] · b̂[i] / R = â[i]·b̂[i] · R⁻¹
+  → ¡Aquí aparece un R⁻¹!  ← Primera fuente de R⁻¹
+  → Estado del coeficiente: ĉ[i] · R⁻¹
+
+Paso 3: poly_invntt (las 8 capas de butterflies)
+  Mismo análisis que la NTT: los R se cancelan en cada butterfly.
+  → Estado del coeficiente: c[j] · R⁻¹  (el R⁻¹ del pointwise persiste)
+
+Paso 4: Normalización final
+  montgomery_reduce(c[j] · f) = c[j] · f · R⁻¹ = c[j] · R⁻¹ · f · R⁻¹
+  → ¡Aquí aparece otro R⁻¹!  ← Segunda fuente de R⁻¹
+  → Estado final: c[j] · f · R⁻²
 ```
 
-Pero en realidad necesitamos `R²` en lugar de `R` porque los coeficientes que entran a la INTT provienen de la multiplicación pointwise (que también usa `montgomery_reduce`), acumulando un factor `R⁻¹` extra. El `R²` compensa ambos:
+Queremos que el estado final sea `c[j] · N⁻¹` (el coeficiente original dividido por 256). Por tanto:
 
 ```
-f = N⁻¹ · R²  mod Q
+f · R⁻² = N⁻¹
+f = N⁻¹ · R²
 ```
+
+El `R²` compensa exactamente los dos factores `R⁻¹` que se acumulan: uno del **pointwise** (paso 2) y otro del propio **montgomery_reduce final** (paso 4).
 
 ### El cálculo paso a paso
 

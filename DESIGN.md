@@ -344,7 +344,7 @@ El valor `f = 41978` incorpora dos correcciones en una sola multiplicación:
 1. **El factor `1/N = 1/256`:** La NTT inversa necesita dividir por `N` para deshacer la escala de la NTT directa.
 2. **La des-conversión de Montgomery (`R²`):** Los coeficientes acumulan factores de Montgomery durante las 7+1 capas de `montgomery_reduce`. Para cancelarlos, `f` incluye `R² = (2³²)² mod Q`.
 
-$$f = N^{-1} \\cdot R^2 \\pmod{Q} = 8347681 \\cdot 2365951 \\pmod{8380417} = 41978$$
+$$f = N^{-1} \cdot R^2 \pmod{Q} = 8347681 \cdot 2365951 \pmod{8380417} = 41978$$
 
 ---
 
