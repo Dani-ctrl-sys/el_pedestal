@@ -1,6 +1,6 @@
-# STUDY_GUIDE.md — Guía de Estudio Completa: Fase 1 de `el_pedestal`
+# STUDY_GUIDE.md — Guía de Estudio Completa: Fases 1 y 2 de `el_pedestal`
 
-> **Propósito:** Este documento es tu recurso personal de estudio. Explica **todo** lo que ocurre en la Fase 1 del proyecto: qué hace cada pieza, **por qué** la necesitamos, y cómo encajan entre sí. Está pensado para que lo leas, lo releas y te sirva de referencia cuando necesites recordar cualquier concepto.
+> **Propósito:** Este documento es tu recurso personal de estudio. Explica **todo** lo que ocurre en las Fases 1 y 2 del proyecto: qué hace cada pieza, **por qué** la necesitamos, y cómo encajan entre sí. Está pensado para que lo leas, lo releas y te sirva de referencia cuando necesites recordar cualquier concepto.
 >
 > - Para los contratos de interfaz y decisiones de ingeniería → [`DESIGN.md`](../DESIGN.md)
 > - Para las demostraciones algebraicas formales → [`MATH_PROOFS.md`](MATH_PROOFS.md)
@@ -18,6 +18,20 @@
 7. [Seguridad de Tiempo Constante: Por qué prohibimos los `if`](#7-seguridad-de-tiempo-constante)
 8. [Mapa de Constantes: El diccionario rápido](#8-mapa-de-constantes)
 9. [Cómo encaja todo: El flujo completo de un dato](#9-cómo-encaja-todo)
+
+**Fase 2 — NTT (Number Theoretic Transform):**
+
+10. [¿Qué es la NTT y por qué la necesitamos?](#10-qué-es-la-ntt-y-por-qué-la-necesitamos)
+11. [Las raíces de la unidad: el corazón de la NTT](#11-las-raíces-de-la-unidad-el-corazón-de-la-ntt)
+12. [La tabla de zetas: Bit-Reversal y dominio Montgomery](#12-la-tabla-de-zetas-bit-reversal-y-dominio-montgomery)
+13. [La operación mariposa (butterfly)](#13-la-operación-mariposa-butterfly)
+14. [La NTT capa por capa](#14-la-ntt-capa-por-capa)
+15. [La NTT inversa (INTT)](#15-la-ntt-inversa-intt)
+16. [El factor de normalización f = 41978](#16-el-factor-de-normalización-f--41978)
+17. [Multiplicación Pointwise](#17-multiplicación-pointwise)
+18. [El flujo completo de la multiplicación de polinomios](#18-el-flujo-completo-de-la-multiplicación-de-polinomios)
+19. [Mapa de Constantes — Fase 2](#19-mapa-de-constantes--fase-2)
+20. [Verificación de integridad: el test NTT → INTT](#20-verificación-de-integridad-el-test-ntt--intt)
 
 ---
 
