@@ -688,8 +688,503 @@ Eso significa que podemos **acumular** (sumar) hasta `2^9 = 512` coeficientes re
 
 En la práctica, la NTT de ML-DSA hace como máximo **una suma o resta entre cada multiplicación** (la mariposa butterfly: `a + w*b` y `a - w*b`). Tras la multiplicación `w*b` aplicamos `montgomery_reduce`, que devuelve `|res| ≤ Q`. Luego sumamos/restamos con `a` (también `|a| ≤ Q`), obteniendo `|resultado| ≤ 2Q ≈ 2^24`. Muy lejos del límite de `2^31`.
 
+
 Este diseño evita reducciones innecesarias y maximiza el rendimiento sin sacrificar la corrección.
 
 ---
+---
 
-*Guía de estudio personal — Fase 1 | `el_pedestal` | ML-DSA bare-metal en C99 de 32 bits*
+# Fase 2: La NTT (Number Theoretic Transform)
+
+---
+
+## 10. ¿Qué es la NTT y por qué la necesitamos?
+
+### El problema: multiplicar polinomios es caro
+
+ML-DSA trabaja con **polinomios** de grado 255 (es decir, vectores de 256 coeficientes, cada uno en `Z_Q`). La operación más costosa del algoritmo es **multiplicar dos polinomios** entre sí.
+
+Si multiplicamos dos polinomios de grado 255 de forma directa (el método "escolar"), cada coeficiente del resultado es la suma de hasta 256 productos. Hay 511 coeficientes en el resultado. La complejidad es `O(N²) = O(256²) = 65 536` multiplicaciones. Esto es **inaceptable** para un sistema embebido.
+
+### La solución: transformar, multiplicar, destransformar
+
+La NTT (Number Theoretic Transform) es el equivalente modular de la FFT (Fast Fourier Transform). La idea es:
+
+```
+Dominio de COEFICIENTES          Dominio de EVALUACIÓN (NTT)
+                                 
+  a(x) = a₀ + a₁x + ... + a₂₅₅x²⁵⁵        â = [â₀, â₁, ..., â₂₅₅]
+  b(x) = b₀ + b₁x + ... + b₂₅₅x²⁵⁵        b̂ = [b̂₀, b̂₁, ..., b̂₂₅₅]
+                                 
+  Multiplicar: O(N²) = 65 536    Multiplicar: O(N) = 256
+  (convolución)                  (componente a componente: ĉᵢ = âᵢ · b̂ᵢ)
+```
+
+El truco es que la NTT convierte una **convolución** (cara) en una **multiplicación componente a componente** (barata). El flujo completo es:
+
+```
+1. â = NTT(a)            ← O(N log N) = O(256 × 8) = 2048 operaciones
+2. b̂ = NTT(b)            ← O(N log N)
+3. ĉᵢ = âᵢ · b̂ᵢ          ← O(N) = 256 multiplicaciones
+4. c = INTT(ĉ)           ← O(N log N)
+```
+
+**Coste total:** `3 × O(N log N) + O(N) ≈ 6 400` operaciones, frente a las `65 536` del método directo. **Ahorro de un factor 10×.**
+
+### La analogía con la FFT
+
+Si conoces la FFT (Fast Fourier Transform), la NTT es **exactamente lo mismo**, pero:
+
+| FFT (señales)                          | NTT (criptografía)                        |
+|----------------------------------------|--------------------------------------------|
+| Números complejos `C`                  | Enteros modulares `Z_Q`                    |
+| Raíz de la unidad: `e^(2πi/N)`        | Raíz de la unidad: `ζ = 1753` (mod Q)     |
+| Multiplicación de punto flotante       | Multiplicación modular (Montgomery)        |
+| Resultado aproximado (redondeo)        | Resultado **exacto** (aritmética entera)   |
+
+La ventaja de la NTT sobre la FFT es que no hay errores de redondeo de punto flotante: todo es aritmética entera exacta.
+
+---
+
+## 11. Las raíces de la unidad: el corazón de la NTT
+
+### ¿Qué es una raíz de la unidad?
+
+En el contexto de `Z_Q`, una **raíz $n$-ésima de la unidad** es un número `w` tal que:
+
+```
+w^n ≡ 1  (mod Q)        ← "dar la vuelta completa" vuelve a 1
+w^k ≢ 1  (mod Q)        para todo 0 < k < n    ← no "llega antes"
+```
+
+Es como un reloj modular: si avanzas `n` pasos de tamaño `w`, vuelves al punto de partida (el 1). Pero si avanzas menos de `n` pasos, no has completado la vuelta.
+
+### ¿Por qué necesitamos orden 512 y no 256?
+
+Esta es una sutileza **crucial** que diferencia la NTT de ML-DSA de una NTT genérica.
+
+ML-DSA no trabaja en el anillo `Z_Q[X] / (X^256 - 1)`, sino en `Z_Q[X] / (X^256 + 1)`. La diferencia es enorme:
+
+- Con `(X^256 - 1)`: necesitamos raíces de `X^256 = 1`, es decir, raíces de orden 256.
+- Con `(X^256 + 1)`: necesitamos raíces de `X^256 = -1`, es decir, un `w` tal que `w^256 ≡ -1 (mod Q)`.
+
+Si `w^256 = -1`, entonces `w^512 = (-1)^2 = 1`. Pero `w^256 ≠ 1`. Por tanto, `w` tiene orden exactamente **512**.
+
+### ¿Por qué Z_Q[X] / (X^256 + 1) y no (X^256 - 1)?
+
+Porque el anillo `Z_Q[X] / (X^256 + 1)` es el anillo de polinomios **ciclotómico** que ML-DSA necesita para la seguridad del esquema lattice-based. El polinomio `X^256 + 1` es irreducible sobre `Z` (es el polinomio ciclotómico `Φ₅₁₂(X)`), lo que da al anillo propiedades algebraicas especiales necesarias para las pruebas de seguridad del esquema.
+
+### La constante ζ = 1753
+
+`ZETA = 1753` es la raíz primitiva 512-ésima de la unidad en `Z_Q` elegida por el estándar. Se verifica:
+
+```
+1753^512 mod 8 380 417 = 1          ← tiene orden que divide a 512
+1753^256 mod 8 380 417 = 8 380 416  ← que es Q - 1 ≡ -1 (mod Q)
+```
+
+El hecho de que `ζ^256 = -1` (y no 1) confirma que el orden es exactamente 512.
+
+**¿Por qué existe una raíz de orden 512?**
+
+Porque `Q - 1 = 8 380 416 = 2^13 × 1023`. Dado que `512 = 2^9` divide a `Q - 1` (y `9 ≤ 13`), el grupo multiplicativo `Z_Q*` (que es cíclico de orden `Q - 1`) contiene elementos de orden exactamente 512.
+
+> **Demostración formal:** [`MATH_PROOFS.md`, Demostración 8](MATH_PROOFS.md#demostración-8-existencia-y-orden-de-la-raíz-de-la-unidad-zeta--1753)
+
+---
+
+## 12. La tabla de zetas: Bit-Reversal y dominio Montgomery
+
+### ¿Qué contiene la tabla `zetas[]`?
+
+La tabla `zetas[256]` contiene las 256 potencias de `ζ` que la NTT necesita durante sus 8 capas de butterflies. Pero no están almacenadas en orden natural (`ζ^0, ζ^1, ζ^2, ...`). Tienen dos transformaciones aplicadas:
+
+### Transformación 1: Permutación bit-reversal
+
+**¿Qué es?** El índice `i` de la tabla almacena `ζ` elevado a la potencia `bitrev(i)`, donde `bitrev` invierte los 8 bits binarios del índice.
+
+**Ejemplo:**
+```
+i = 1  →  binario: 00000001  →  invertido: 10000000  →  bitrev(1) = 128
+i = 2  →  binario: 00000010  →  invertido: 01000000  →  bitrev(2) = 64
+i = 3  →  binario: 00000011  →  invertido: 11000000  →  bitrev(3) = 192
+```
+
+Entonces:
+```
+zetas[1] = ζ^128 · R mod Q = 25 847
+zetas[2] = ζ^64  · R mod Q = 5 771 523
+zetas[3] = ζ^192 · R mod Q = 7 861 508
+```
+
+**¿Por qué hacemos esto?** Porque la NTT de Cooley-Tukey accede a las zetas en un orden específico determinado por la estructura de las capas. Si almacenamos las zetas en orden bit-reversal, los tres bucles anidados de la NTT pueden acceder a ellas con un simple `k++` (acceso secuencial), sin necesidad de calcular índices complejos en tiempo de ejecución.
+
+Capa por capa:
+```
+Capa 0 (len=128, 1 bloque):    necesita ζ^128           → k=1
+Capa 1 (len=64,  2 bloques):   necesita ζ^64, ζ^192     → k=2,3
+Capa 2 (len=32,  4 bloques):   necesita ζ^32, ζ^160, ζ^96, ζ^224  → k=4,5,6,7
+...y así sucesivamente, cada capa duplica el número de bloques.
+```
+
+> **Demostración formal:** [`MATH_PROOFS.md`, Demostración 9](MATH_PROOFS.md#demostración-9-corrección-de-la-permutación-bit-reversal-en-la-tabla-de-zetas)
+
+### Transformación 2: Conversión al dominio de Montgomery
+
+Cada zeta se almacena multiplicada por `R = 2^32 mod Q`:
+
+```
+zetas[i] = ζ^(bitrev(i)) · 2^32  mod Q
+```
+
+**¿Por qué?** Porque dentro de la NTT, cada butterfly hace:
+
+```c
+t = montgomery_reduce((int64_t)zeta * a[j + len]);
+```
+
+El `montgomery_reduce` divide por `R = 2^32`. Si la zeta ya tiene un factor `R` incorporado, la reducción lo cancela:
+
+```
+montgomery_reduce(zeta_mont * b) = (ζ·R · b) / R = ζ · b  (mod Q)
+```
+
+Resultado limpio, sin factores de Montgomery residuales. Las 256 conversiones se pagan **una sola vez** (off-line, en `generate_zetas.py`), y las 1792 multiplicaciones de la NTT se benefician.
+
+---
+
+## 13. La operación mariposa (butterfly)
+
+### ¿Qué es una mariposa?
+
+La **mariposa** (butterfly) es la operación atómica de la NTT. Toma dos elementos (`a[j]` y `a[j+len]`) y una raíz de torsión (`zeta`), y produce dos nuevos elementos:
+
+```
+Entrada:    a = a[j],    b = a[j+len],    ω = zeta
+
+Salida:     a' = a + ω·b
+            b' = a - ω·b
+```
+
+Es decir, calcula la suma y la diferencia del elemento original con el producto `ω·b`.
+
+### ¿Por qué se llama "mariposa"?
+
+Si dibujas las conexiones, forman una "X" que se asemeja a las alas de una mariposa:
+
+```
+a[j]     ──────●──────→  a[j]     = a + ω·b
+               ╲╱
+               ╱╲
+a[j+len] ──●──────→  a[j+len] = a - ω·b
+            ×ω
+```
+
+### El código de la butterfly directa (Cooley-Tukey)
+
+```c
+t = montgomery_reduce((int64_t)zeta * a[j + len]);   // t = ω · b  (mod Q)
+a[j + len] = a[j] - t;                                // b' = a - t
+a[j]       = a[j] + t;                                // a' = a + t
+```
+
+**¿Por qué funciona?**
+1. Se calcula `t = ω · b mod Q` usando Montgomery (las zetas ya están en dominio Montgomery, así que el factor `R` se cancela).
+2. Se actualiza `a[j+len]` **antes** de `a[j]`. Esto es importante: se usa el valor original de `a[j]` en ambas líneas.
+3. El resultado es correcto módulo `Q`, y no se necesita reducción adicional porque los valores tienen suficiente margen (≤ `2Q`, que cabe en un `int32_t`).
+
+### La butterfly inversa (Gentleman-Sande)
+
+En la INTT, el orden de las operaciones se **invierte**: primero se suma/resta, y luego se multiplica.
+
+```c
+t = a[j];                                              // Guardar valor original
+a[j]       = caddq(t + a[j + len]);                    // a' = a + b (normalizado)
+a[j + len] = t - a[j + len];                           // diff = a - b
+a[j + len] = montgomery_reduce((int64_t)zeta * a[j + len]);  // b' = (-ω) · diff
+```
+
+**Diferencias clave:**
+- **Orden invertido:** primero suma/resta, luego multiplica (en vez de primero multiplicar y luego sumar/restar).
+- **Zeta negada:** se usa `-zetas[k]` en lugar de `+zetas[k]`. Negar la raíz implementa la "conjugación" necesaria para invertir la transformación.
+- **`caddq` en la suma:** Sin esto, la suma `t + a[j+len]` podría producir valores negativos que se acumularían capa tras capa, causando desbordamiento.
+
+> **Demostración formal:** [`MATH_PROOFS.md`, Demostración 10](MATH_PROOFS.md#demostración-10-corrección-de-la-mariposa-de-cooley-tukey)
+
+---
+
+## 14. La NTT capa por capa
+
+### La estructura de tres bucles anidados
+
+La NTT directa tiene tres bucles que controlan la transformación:
+
+```c
+k = 1;
+for (len = 128; len >= 1; len >>= 1) {           // Bucle 1: CAPAS
+    for (start = 0; start < 256; start = j + len) { // Bucle 2: BLOQUES
+        zeta = zetas[k++];                            // Una zeta por bloque
+        for (j = start; j < start + len; ++j) {      // Bucle 3: BUTTERFLIES
+            // ... operación mariposa ...
+        }
+    }
+}
+```
+
+**Bucle 1 — Las capas (`len`):**
+- Hay **8 capas** (porque `log2(256) = 8`).
+- `len` empieza en 128 y se divide por 2 en cada capa: `128, 64, 32, 16, 8, 4, 2, 1`.
+- `len` representa la "distancia" entre los dos elementos que participan en cada butterfly.
+
+**Bucle 2 — Los bloques (`start`):**
+- Cada capa tiene `256 / (2 × len)` bloques independientes.
+- Cada bloque usa **una sola zeta** (la raíz de torsión para ese sub-problema).
+
+**Bucle 3 — Las butterflies (`j`):**
+- Dentro de cada bloque, hay `len` mariposas que procesan pares de elementos.
+
+### Visualización de las primeras capas
+
+```
+Capa 0 (len=128): 1 bloque, 128 butterflies
+  Zeta: ζ^128     Pares: (0,128), (1,129), (2,130), ..., (127,255)
+
+Capa 1 (len=64):  2 bloques, 64 butterflies cada uno
+  Bloque 0: ζ^64   Pares: (0,64), (1,65), ..., (63,127)
+  Bloque 1: ζ^192  Pares: (128,192), (129,193), ..., (191,255)
+
+Capa 2 (len=32):  4 bloques, 32 butterflies cada uno
+  Bloque 0: ζ^32   Pares: (0,32), (1,33), ..., (31,63)
+  Bloque 1: ζ^160  Pares: (64,96), (65,97), ..., (95,127)
+  Bloque 2: ζ^96   Pares: (128,160), (129,161), ..., (159,191)
+  Bloque 3: ζ^224  Pares: (192,224), (193,225), ..., (223,255)
+
+  ... (capas 3-7 siguen el mismo patrón, duplicando bloques y dividiendo len)
+```
+
+### Conteo total de operaciones
+
+```
+Total de butterflies = 128 + 2×64 + 4×32 + 8×16 + 16×8 + 32×4 + 64×2 + 128×1
+                     = 128 × 8 = 1024
+
+Cada butterfly = 1 montgomery_reduce + 1 suma + 1 resta = 3 operaciones
+Total = 1024 × 3 = 3072 operaciones aritméticas
+```
+
+Esto es un orden de magnitud menos que las `65 536` de la multiplicación directa.
+
+---
+
+## 15. La NTT inversa (INTT)
+
+### ¿Qué hace la INTT?
+
+La INTT es la operación inversa de la NTT. Toma los 256 valores evaluados (dominio NTT) y reconstruye los 256 coeficientes del polinomio original.
+
+### Las diferencias respecto a la NTT directa
+
+| Aspecto              | NTT directa (Cooley-Tukey)     | INTT (Gentleman-Sande)                  |
+|----------------------|--------------------------------|------------------------------------------|
+| `len` avanza         | `128 → 1` (dividiendo)        | `1 → 128` (multiplicando)               |
+| `k` avanza           | `1 → 255` (ascendente)        | `255 → 1` (descendente)                 |
+| Signo de zeta        | `+zetas[k]`                   | `-zetas[k]` (conjugado)                 |
+| Butterfly            | Multiplica, luego suma/resta   | Suma/resta, luego multiplica            |
+| `caddq`              | No                            | Sí (normalización intermedia)            |
+| Normalización final  | No                            | Sí (multiplicar por `f = 41978`)         |
+
+**¿Por qué invertir la dirección de `len` y `k`?**
+
+La NTT directa "descompone" el polinomio de arriba hacia abajo (de bloques grandes a pequeños). La INTT lo "recompone" de abajo hacia arriba (de bloques pequeños a grandes). Es como desarmar y rearmar una estructura en orden inverso.
+
+**¿Por qué negar la zeta?**
+
+En la FFT clásica, la transformada inversa usa `e^(-2πi/N)` en lugar de `e^(+2πi/N)`. En la NTT, el equivalente es usar `-ζ^p` en lugar de `+ζ^p`. Negar la raíz es lo que "invierte la rotación" necesaria para deshacer la transformación.
+
+**¿Por qué usar `caddq` en la butterfly inversa?**
+
+En la INTT, la suma `t + a[j+len]` puede producir valores que crecen capa tras capa. Sin normalización, después de 8 capas los valores podrían desbordar un `int32_t`. La llamada a `caddq` mantiene los valores acotados al rango `[0, Q)` en cada iteración, previniendo el desbordamiento.
+
+> **Demostración formal:** [`MATH_PROOFS.md`, Demostración 11](MATH_PROOFS.md#demostración-11-la-intt-es-la-inversa-exacta-de-la-ntt)
+
+---
+
+## 16. El factor de normalización f = 41978
+
+### ¿Por qué necesitamos un factor final?
+
+La NTT directa multiplica efectivamente por una matriz `W` de tamaño `256×256`. La INTT aplica la matriz inversa `W⁻¹ = (1/N) · W*` (donde `W*` es la conjugada). El factor `1/N = 1/256` es lo que "escala" la reconstrucción para que `INTT(NTT(a)) = a` (y no `256·a`).
+
+### ¿Por qué f = 41978 y no simplemente 256⁻¹ mod Q?
+
+Porque la multiplicación final se hace **a través de** `montgomery_reduce`:
+
+```c
+a[j] = montgomery_reduce((int64_t)a[j] * f);
+```
+
+Esto computa `a[j] · f · R⁻¹ mod Q` (donde `R = 2^32`). Queremos que el resultado sea `a[j] · N⁻¹ mod Q`. Para que ambas cosas coincidan:
+
+```
+f · R⁻¹ ≡ N⁻¹  (mod Q)
+f ≡ N⁻¹ · R     (mod Q)
+```
+
+Pero en realidad necesitamos `R²` en lugar de `R` porque los coeficientes que entran a la INTT provienen de la multiplicación pointwise (que también usa `montgomery_reduce`), acumulando un factor `R⁻¹` extra. El `R²` compensa ambos:
+
+```
+f = N⁻¹ · R²  mod Q
+```
+
+### El cálculo paso a paso
+
+```
+N⁻¹ mod Q = 256⁻¹ mod 8 380 417 = 8 347 681
+R mod Q    = 2^32 mod 8 380 417  = 4 193 792
+R² mod Q   = 4 193 792² mod Q   = 2 365 951
+
+f = 8 347 681 × 2 365 951  mod  8 380 417  =  41 978
+```
+
+> **Demostración formal:** [`MATH_PROOFS.md`, Demostración 12](MATH_PROOFS.md#demostración-12-derivación-de-la-constante-de-normalización-f--41978)
+
+---
+
+## 17. Multiplicación Pointwise
+
+### ¿Qué es?
+
+Una vez que dos polinomios están en el dominio NTT (dominio de evaluación), multiplicarlos es **trivial**: simplemente multiplicamos componente a componente.
+
+```c
+void poly_mul_pointwise(int32_t c[256], const int32_t a[256], const int32_t b[256]) {
+    for (int i = 0; i < 256; i++) {
+        c[i] = montgomery_reduce((int64_t)a[i] * b[i]);
+    }
+}
+```
+
+### ¿Por qué funciona?
+
+Por el **Teorema de la Convolución**: la NTT convierte la convolución (multiplicación de polinomios) en multiplicación componente a componente:
+
+```
+NTT(a · b) = NTT(a) ⊙ NTT(b)
+```
+
+donde `⊙` es la multiplicación elemento a elemento (pointwise).
+
+Por tanto:
+
+```
+a · b = INTT(NTT(a) ⊙ NTT(b))
+```
+
+Este es el flujo completo de la multiplicación de polinomios en ML-DSA.
+
+### ¿Cuánto cuesta?
+
+Solo **256 multiplicaciones** + 256 `montgomery_reduce`. Comparado con las 65 536 multiplicaciones del método directo, esto es un ahorro brutal, y es la única razón por la que ML-DSA es viable en hardware embebido de 32 bits.
+
+---
+
+## 18. El flujo completo de la multiplicación de polinomios
+
+```
+      DOMINIO DE COEFICIENTES              DOMINIO NTT (EVALUACIÓN)
+      
+      a(x) = [a₀, a₁, ..., a₂₅₅]
+                    │
+                    ▼
+              ┌──────────┐
+              │ poly_ntt │  ← O(N log N) = 2048 operaciones
+              └────┬─────┘
+                   │
+                   ▼
+              â = [â₀, â₁, ..., â₂₅₅]      b̂ = [b̂₀, b̂₁, ..., b̂₂₅₅]
+                          │                          │
+                          └────────────┬─────────────┘
+                                       ▼
+                          ┌───────────────────────┐
+                          │ poly_mul_pointwise     │  ← O(N) = 256 operaciones
+                          │ ĉᵢ = âᵢ · b̂ᵢ (mod Q)  │
+                          └───────────┬───────────┘
+                                       │
+                                       ▼
+                          ĉ = [ĉ₀, ĉ₁, ..., ĉ₂₅₅]
+                                       │
+                                       ▼
+                          ┌──────────────┐
+                          │ poly_invntt  │  ← O(N log N)
+                          │ + f = 41978  │
+                          └──────┬───────┘
+                                 │
+                                 ▼
+              c(x) = a(x) · b(x)  mod (X²⁵⁶ + 1)  mod Q
+              c = [c₀, c₁, ..., c₂₅₅]
+```
+
+### Coste total vs. método directo
+
+```
+Método directo:  256 × 256 = 65 536 multiplicaciones
+Método NTT:      2 × 1024 (NTT+INTT butterflies) + 256 (pointwise) + 256 (normalización)
+               = 2 560 multiplicaciones (incluyendo montgomery_reduce)
+
+Speedup: 65 536 / 2 560 ≈ 25.6×
+```
+
+Este speedup de **25×** es lo que hace que ML-DSA sea práctico en microcontroladores de 32 bits.
+
+---
+
+## 19. Mapa de Constantes — Fase 2
+
+| Constante | Valor          | Por qué existe                                                                |
+|-----------|----------------|-------------------------------------------------------------------------------|
+| `N`       | `256`          | Grado de los polinomios de ML-DSA. Define la longitud de la NTT.            |
+| `ZETA`    | `1753`         | Raíz primitiva 512-ésima de la unidad en `Z_Q`. Genera todas las zetas.      |
+| `zetas[]` | 256 valores    | Potencias bit-reversed de ζ en dominio Montgomery. Acceso secuencial O(1).   |
+| `f`       | `41978`        | Factor de normalización INTT. `f = N⁻¹ · R² mod Q`. Unifica `1/256` + des-Montgomery. |
+| `caddq`   | (función)      | Normalización intermedia en INTT. Previene desbordamiento entre capas.       |
+
+### Relaciones entre constantes
+
+```
+ζ^512 ≡ 1  (mod Q)          ← Orden de la raíz
+ζ^256 ≡ -1 (mod Q)          ← Propiedad del anillo ciclotómico
+zetas[i] = ζ^bitrev(i) · R  (mod Q)   ← Precomputación
+f = N⁻¹ · R² = 8 347 681 · 2 365 951 = 41 978  (mod Q)  ← Factor INTT
+INTT(NTT(a)) = a            ← Propiedad fundamental
+```
+
+---
+
+## 20. Verificación de integridad: el test NTT → INTT
+
+El test en [`tests/test_arith.c`](../tests/test_arith.c) verifica que la cadena `NTT → INTT` es hermética:
+
+```c
+for (i = 0; i < 256; i++) {
+    a[i] = i;              // Patrón de prueba
+    a_orig[i] = a[i];      // Backup
+}
+
+poly_ntt(a);                // Transformar al dominio NTT
+poly_invntt(a);             // Volver al dominio de coeficientes
+
+for (i = 0; i < 256; i++) {
+    if (a[i] != a_orig[i])  // ¿Se recupera el valor original?
+        errores++;
+}
+```
+
+Si `errores == 0`, la NTT y la INTT son inversas exactas, lo que confirma que:
+- Las zetas están correctamente precomputadas (bit-reversal + Montgomery).
+- La operación butterfly es algebraicamente correcta.
+- El factor `f = 41978` normaliza perfectamente.
+- No hay desbordamientos en ninguna capa.
+
+---
+
+*Guía de estudio personal — Fases 1 y 2 | `el_pedestal` | ML-DSA bare-metal en C99 de 32 bits*

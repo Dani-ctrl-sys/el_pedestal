@@ -184,13 +184,233 @@ int32_t barrett_reduce(int32_t a);    // Salida: a mod Q, |res| ≤ Q/2
 
 ---
 
-## 9. Hoja de Ruta — Fases Futuras
+---
 
-- **Fase 2:** NTT (Number Theoretic Transform) de longitud 256 sobre `Z_Q`, usando raíces de unidad de orden 256.
+# Fase 2: NTT (Number Theoretic Transform)
+
+---
+
+## 9. Contexto de la NTT en ML-DSA
+
+ML-DSA opera sobre polinomios en el anillo `Z_Q[X] / (X^256 + 1)`. La multiplicación de polinomios en este anillo es la operación más costosa del algoritmo de firma. La **NTT** (Number Theoretic Transform) reduce la complejidad de esta multiplicación de `O(N²)` a `O(N log N)`, donde `N = 256`.
+
+La NTT es el equivalente modular de la FFT (Fast Fourier Transform): transforma un polinomio del dominio de coeficientes al dominio de evaluación, donde la multiplicación de polinomios se reduce a 256 multiplicaciones escalares independientes (pointwise).
+
+---
+
+## 10. Parámetros de la NTT
+
+| Constante | Valor       | Rol                                                              |
+|-----------|-------------|------------------------------------------------------------------|
+| `N`       | `256`       | Grado del polinomio / longitud de la NTT                        |
+| `ZETA`    | `1753`      | Raíz primitiva 512-ésima de la unidad en `Z_Q`                  |
+| `f`       | `41978`     | Factor de normalización de la INTT: `f = R² · N⁻¹ mod Q`       |
+| `zetas[]` | 256 valores | Tabla precalculada de potencias de `ZETA` en dominio Montgomery  |
+
+> Para la derivación de `ZETA = 1753`, la justificación del uso de raíces de orden 512 (no 256), la permutación bit-reversal de la tabla `zetas[]`, y la derivación de `f = 41978`, consultar [`docs/MATH_PROOFS.md`](docs/MATH_PROOFS.md), demostraciones 8–12.
+
+### 10.1 Por qué ZETA = 1753 y orden 512
+
+La NTT que necesita ML-DSA opera en el anillo cociente `Z_Q[X] / (X^256 + 1)`, no en `Z_Q[X] / (X^256 - 1)`. El factor `(X^256 + 1)` exige una raíz de la unidad de **orden 512** (no 256), ya que necesitamos `w` tal que `w^256 ≡ -1 (mod Q)`. Esto solo es posible si `w` tiene orden exactamente 512.
+
+`ZETA = 1753` es la raíz primitiva 512-ésima de la unidad en `Z_Q` usada por la implementación de referencia de ML-DSA.
+
+---
+
+## 11. La Tabla de Zetas: Precomputación y Bit-Reversal
+
+**Archivo:** `src/ntt.c` · **Generador:** `tools/generate_zetas.py`
+
+```c
+extern const int32_t zetas[256];
+```
+
+La tabla `zetas[]` contiene las 256 potencias de `ZETA` que la NTT necesita, con dos transformaciones aplicadas:
+
+1. **Permutación bit-reversal:** El índice `i` de la tabla almacena `ZETA^(bitrev(i))`, donde `bitrev` invierte los 8 bits del índice. Esto permite que los tres bucles anidados de la NTT accedan a las zetas de forma **secuencial** (`k++`), eliminando la necesidad de calcular índices complejos en tiempo de ejecución.
+
+2. **Conversión al dominio de Montgomery:** Cada valor se almacena como `ZETA^(bitrev(i)) · 2³² mod Q`. Esto permite que la operación butterfly use directamente `montgomery_reduce((int64_t)zeta * a[j+len])` sin conversiones adicionales.
+
+### 11.1 Generación (`tools/generate_zetas.py`)
+
+```python
+for i in range(256):
+    br_i = bit_reverse(i)                  # Paso 1: Permutar índice
+    z_power = pow(ZETA, br_i, Q)            # Paso 2: Potencia modular
+    z_mont = (z_power * (1 << 32)) % Q      # Paso 3: Al dominio Montgomery
+```
+
+---
+
+## 12. NTT Directa (`poly_ntt`)
+
+**Archivo:** `src/ntt.c` · **Declaración:** `inc/ntt.h`
+
+```c
+void poly_ntt(int32_t a[256]);
+```
+
+**Contrato:**
+- **Entrada:** Array de 256 coeficientes en `Z_Q` (dominio normal o parcialmente reducido)
+- **Salida:** Array de 256 coeficientes en el **dominio NTT** (dominio de evaluación, en representación de Montgomery)
+- **In-place:** Modifica el array de entrada directamente
+
+**Estructura de tres bucles anidados (Cooley-Tukey, decimación en tiempo):**
+
+```c
+void poly_ntt(int32_t a[256]) {
+    unsigned int len, start, j, k;
+    int32_t zeta, t;
+
+    k = 1;
+    for (len = 128; len >= 1; len >>= 1) {          // Bucle 1: 8 capas
+        for (start = 0; start < 256; start = j + len) { // Bucle 2: bloques
+            zeta = zetas[k++];
+            for (j = start; j < start + len; ++j) {    // Bucle 3: butterfly
+                t = montgomery_reduce((int64_t)zeta * a[j + len]);
+                a[j + len] = a[j] - t;
+                a[j]       = a[j] + t;
+            }
+        }
+    }
+}
+```
+
+**Mecánica de la mariposa (butterfly):**
+
+1. `t = montgomery_reduce((int64_t)zeta * a[j + len])` — Multiplica el elemento "inferior" por la zeta y reduce.
+2. `a[j + len] = a[j] - t` — El nuevo elemento inferior es la diferencia.
+3. `a[j] = a[j] + t` — El nuevo elemento superior es la suma.
+
+**Acceso secuencial a zetas:** El índice `k` avanza linealmente (`k++`). La permutación bit-reversal de la tabla garantiza que esto sea correcto sin cálculos de índice adicionales.
+
+---
+
+## 13. NTT Inversa (`poly_invntt`)
+
+**Archivo:** `src/ntt.c` · **Declaración:** `inc/ntt.h`
+
+```c
+void poly_invntt(int32_t a[256]);
+```
+
+**Contrato:**
+- **Entrada:** Array de 256 coeficientes en el dominio NTT
+- **Salida:** Array de 256 coeficientes en el dominio normal (coeficientes del polinomio)
+- **In-place:** Modifica el array de entrada directamente
+
+**Estructura (Gentleman-Sande, decimación en frecuencia):**
+
+```c
+void poly_invntt(int32_t a[256]) {
+    unsigned int len, start, j, k;
+    int32_t zeta, t;
+
+    k = 255;
+    for (len = 1; len < 256; len <<= 1) {              // Bucle 1: 8 capas (invertido)
+        for (start = 0; start < 256; start = j + len) {
+            zeta = -zetas[k--];                         // Zeta negada, índice descendente
+            for (j = start; j < start + len; ++j) {
+                t = a[j];
+                a[j]       = caddq(t + a[j + len]);    // Suma + normalización
+                a[j + len] = t - a[j + len];
+                a[j + len] = montgomery_reduce((int64_t)zeta * a[j + len]);
+            }
+        }
+    }
+
+    const int32_t f = 41978;                            // Factor de normalización
+    for (j = 0; j < 256; j++) {
+        a[j] = montgomery_reduce((int64_t)a[j] * f);
+    }
+}
+```
+
+**Diferencias clave respecto a `poly_ntt`:**
+
+| Aspecto              | `poly_ntt` (directa)        | `poly_invntt` (inversa)                  |
+|----------------------|-----------------------------|-------------------------------------------|
+| Dirección de `len`   | `128 → 1` (divide por 2)   | `1 → 128` (multiplica por 2)             |
+| Dirección de `k`     | `1 → 255` (ascendente)     | `255 → 1` (descendente)                  |
+| Signo de zeta        | `+zetas[k]`                | `-zetas[k]` (conjugado)                  |
+| Orden de la butterfly| Multiplica antes de sumar/restar | Suma/resta antes de multiplicar     |
+| Normalización final  | No necesaria               | Multiplicación por `f = 41978`            |
+| Uso de `caddq`       | No                         | Sí (en la suma de la butterfly inversa)   |
+
+### 13.1 El factor de normalización `f = 41978`
+
+El valor `f = 41978` incorpora dos correcciones en una sola multiplicación:
+
+1. **El factor `1/N = 1/256`:** La NTT inversa necesita dividir por `N` para deshacer la escala de la NTT directa.
+2. **La des-conversión de Montgomery (`R²`):** Los coeficientes acumulan factores de Montgomery durante las 7+1 capas de `montgomery_reduce`. Para cancelarlos, `f` incluye `R² = (2³²)² mod Q`.
+
+$$f = N^{-1} \\cdot R^2 \\pmod{Q} = 8347681 \\cdot 2365951 \\pmod{8380417} = 41978$$
+
+---
+
+## 14. Multiplicación Pointwise (`poly_mul_pointwise`)
+
+**Archivo:** `src/ntt.c` · **Declaración:** `inc/ntt.h`
+
+```c
+void poly_mul_pointwise(int32_t c[256], const int32_t a[256], const int32_t b[256]);
+```
+
+**Contrato:**
+- **Entrada:** `a` y `b` en dominio NTT
+- **Salida:** `c` en dominio NTT, donde `c[i] = a[i] · b[i] · 2⁻³² mod Q`
+
+**Mecánica:** 256 multiplicaciones escalares independientes, cada una seguida de `montgomery_reduce`:
+
+```c
+for (i = 0; i < 256; ++i) {
+    c[i] = montgomery_reduce((int64_t)a[i] * b[i]);
+}
+```
+
+Esta es la razón de ser de la NTT: la multiplicación de polinomios de complejidad `O(N²)` en el dominio de coeficientes se convierte en `O(N)` multiplicaciones independientes en el dominio de evaluación.
+
+---
+
+## 15. Interfaz Pública de Fase 2 (`inc/ntt.h`)
+
+```c
+#ifndef NTT_H
+#define NTT_H
+
+#include <stdint.h>
+
+extern const int32_t zetas[256];
+
+void poly_ntt(int32_t a[256]);
+void poly_mul_pointwise(int32_t c[256], const int32_t a[256], const int32_t b[256]);
+void poly_invntt(int32_t a[256]);
+
+#endif
+```
+
+---
+
+## 16. Decisiones de Ingeniería — Fase 2
+
+| Decisión | Alternativa Descartada | Razón |
+|---|---|---|
+| Zetas en bit-reversal + dominio Montgomery | Cálculo dinámico de potencias de ζ | Acceso secuencial O(1), sin exponenciación modular en runtime |
+| NTT in-place (Cooley-Tukey / Gentleman-Sande) | NTT con buffer auxiliar | Ahorro de 1 KiB de RAM (crítico en embedded) |
+| Factor `f` unificado en la INTT | Normalización separada `1/N` + des-Montgomery | Una sola pasada final reduce el número de `montgomery_reduce` |
+| `caddq` en la butterfly inversa | Sin normalización intermedia | Evita crecimiento descontrolado de los coeficientes entre capas |
+| Tabla `zetas[]` en `const` (Flash) | Tabla en RAM | Los 1 KiB de zetas residen en ROM/Flash, no consumen RAM |
+
+---
+
+## 17. Hoja de Ruta — Fases Futuras
+
+- ~~**Fase 1:** Aritmética modular (Montgomery, Barrett, reducciones condicionales).~~ ✅
+- ~~**Fase 2:** NTT de longitud 256 sobre `Z_Q`.~~ ✅
 - **Fase 3:** Operaciones de polinomios (`polyvec_*`) y operaciones de módulo.
 - **Fase 4:** Funciones de hash (SHAKE-128/256) para la generación de matrices y masking.
 - **Fase 5:** Keygen, Sign y Verify completos según FIPS 204.
 
 ---
 
-*Documento de arquitectura — Fase 1 | `el_pedestal` | ML-DSA bare-metal en C99 de 32 bits*
+*Documento de arquitectura — Fases 1 y 2 | `el_pedestal` | ML-DSA bare-metal en C99 de 32 bits*
