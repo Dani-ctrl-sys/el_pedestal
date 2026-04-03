@@ -9,25 +9,50 @@
 
 ## Índice
 
+**Fase 1 — Aritmética Modular:**
+
 1. [El Panorama General: ¿Qué estamos construyendo y por qué?](#1-el-panorama-general)
+   - [¿Qué es `el_pedestal`?](#qué-es-el_pedestal)
+   - [¿Qué construye exactamente la Fase 1?](#qué-hace-la-fase-1-exactamente)
+   - [¿Por qué no podemos simplemente usar `a % Q`?](#por-qué-no-usar-simplemente-a--q)
+   - [Las tres amenazas que la Fase 1 neutraliza](#las-tres-amenazas-que-la-fase-1-neutraliza)
 2. [El Cuerpo Finito Z_Q: Nuestro universo aritmético](#2-el-cuerpo-finito-z_q)
+   - [¿Por qué Q = 8 380 417?](#por-qué-q--8-380-417)
+   - [Representación centrada vs. no centrada](#representación-centrada-vs-no-centrada)
 3. [El Problema del Desbordamiento: Por qué no podemos simplemente usar `%`](#3-el-problema-del-desbordamiento)
+   - [Las dos estrategias de reducción](#las-dos-estrategias-de-reducción)
 4. [Reducción de Montgomery: Dividir sin dividir](#4-reducción-de-montgomery)
+   - [El Dominio de Montgomery](#el-dominio-de-montgomery)
+   - [El algoritmo paso a paso](#el-algoritmo-paso-a-paso)
+   - [La constante QINV](#la-constante-qinv--58-728-449)
+   - [Ciclo de vida del dominio](#el-ciclo-de-vida-del-dominio-de-montgomery)
 5. [Reducción de Barrett: Aproximar el cociente con shifts](#5-reducción-de-barrett)
+   - [¿Por qué k = 26 y m = 8?](#por-qué-k--26-y-m--8)
+   - [La inyección de 2^25 y el redondeo](#paso-1-estimar-el-cociente-con-redondeo)
 6. [Reducciones Condicionales: Los guardianes del rango](#6-reducciones-condicionales)
+   - [`conditional_subq`: Rango canónico](#conditional_subq-normalización-al-rango-canónico)
+   - [`caddq`: Ajuste de negativos](#caddq-ajuste-de-negativos)
 7. [Seguridad de Tiempo Constante: Por qué prohibimos los `if`](#7-seguridad-de-tiempo-constante)
-8. [Mapa de Constantes: El diccionario rápido](#8-mapa-de-constantes)
+   - [Las dos vías de fuga de información](#qué-hace-que-el-código-sea-vulnerable)
+   - [La solución: el multiplexor aritmético](#la-solución-el-multiplexor-aritmético)
+8. [Mapa de Constantes — Fase 1](#8-mapa-de-constantes)
 9. [Cómo encaja todo: El flujo completo de un dato](#9-cómo-encaja-todo)
 
 **Fase 2 — NTT (Number Theoretic Transform):**
 
 10. [¿Qué es la NTT y por qué la necesitamos?](#10-qué-es-la-ntt-y-por-qué-la-necesitamos)
+    - [El problema: multiplicar polinomios es caro](#el-problema-multiplicar-polinomios-es-caro)
+    - [La solución: transformar, multiplicar, destransformar](#la-solución-transformar-multiplicar-destransformar)
+    - [Analogía con la FFT](#la-analogía-con-la-fft)
 11. [Las raíces de la unidad: el corazón de la NTT](#11-las-raíces-de-la-unidad-el-corazón-de-la-ntt)
+    - [¿Por qué orden 512 y no 256?](#por-qué-necesitamos-orden-512-y-no-256)
+    - [La constante ζ = 1753](#la-constante-ζ--1753)
 12. [La tabla de zetas: Bit-Reversal y dominio Montgomery](#12-la-tabla-de-zetas-bit-reversal-y-dominio-montgomery)
 13. [La operación mariposa (butterfly)](#13-la-operación-mariposa-butterfly)
 14. [La NTT capa por capa](#14-la-ntt-capa-por-capa)
 15. [La NTT inversa (INTT)](#15-la-ntt-inversa-intt)
 16. [El factor de normalización f = 41978](#16-el-factor-de-normalización-f--41978)
+    - [Tracking preciso de los factores R](#tracking-preciso-de-los-factores-r-paso-a-paso)
 17. [Multiplicación Pointwise](#17-multiplicación-pointwise)
 18. [El flujo completo de la multiplicación de polinomios](#18-el-flujo-completo-de-la-multiplicación-de-polinomios)
 19. [Mapa de Constantes — Fase 2](#19-mapa-de-constantes--fase-2)
@@ -39,34 +64,75 @@
 
 ### ¿Qué es `el_pedestal`?
 
-`el_pedestal` es una implementación en C99 del algoritmo de firma digital **ML-DSA** (anteriormente conocido como CRYSTALS-Dilithium), estandarizado en **FIPS 204** por el NIST. Es un algoritmo de criptografía **post-cuántica**, lo que significa que está diseñado para resistir ataques de computadores cuánticos.
+`el_pedestal` es una implementación en C99 del algoritmo de firma digital **ML-DSA** (anteriormente conocido como CRYSTALS-Dilithium), estandarizado en **FIPS 204** por el NIST. Es un algoritmo de criptografía **post-cuántica**, lo que significa que está diseñado para resistir ataques de computadores cuánticos que, en un futuro próximo, podrían romper los sistemas de firma actuales basados en RSA o ECDSA.
+
+El proyecto es de especial relevancia porque se implementa sobre un **sistema embebido de 32 bits** con recursos severamente limitados: sin sistema operativo, sin unidad de punto flotante, sin bibliotecas de alto nivel. Todo el peso cae sobre el programador, que debe ser extremadamente meticuloso con cada ciclo de CPU y cada bit de seguridad.
 
 ### ¿Por qué "el pedestal"?
 
-Porque la Fase 1 es literalmente el **pedestal** sobre el que se sostiene todo lo demás. Sin una aritmética modular correcta, eficiente y segura, nada de lo que construyamos encima (NTT, polinomios, firmas) funcionará.
+El nombre refleja perfectamente el papel de la Fase 1: es literalmente el **pedestal** sobre el que se sostiene toda la construcción matemática. Un esquema como ML-DSA requiere cientos de miles de operaciones aritméticas durante una sola firma. Si esas operaciones son lentas, inseguras o incorrectas, el sistema completo falla. Una Fase 1 sólida es la condición necesaria para que todo lo demás sea posible.
 
 ### ¿Qué hace la Fase 1 exactamente?
 
 La Fase 1 implementa las **cuatro operaciones aritméticas fundamentales** que necesita ML-DSA para trabajar dentro del cuerpo finito `Z_Q`:
 
-| Función              | Rol                                                        |
-|----------------------|------------------------------------------------------------|
-| `montgomery_reduce`  | Reduce el resultado de una multiplicación modular          |
-| `barrett_reduce`     | Reduce un coeficiente individual al rango centrado         |
-| `conditional_subq`   | Normaliza un valor al rango canónico `[0, Q)`             |
-| `caddq`              | Ajusta un valor negativo sumándole `Q` si es necesario     |
+| Función              | Rol principal                                               | Cuándo se llama                             |
+|----------------------|-------------------------------------------------------------|---------------------------------------------|
+| `montgomery_reduce`  | Reduce un producto de 64 bits al rango `[-Q, Q]`           | Después de multiplicar dos coeficientes      |
+| `barrett_reduce`     | Reduce un acumulador de 32 bits al rango centrado `[-Q/2, Q/2]` | Después de sumas o acumulaciones            |
+| `conditional_subq`   | Normaliza al rango canónico `[0, Q)`                        | Antes de serializar o comparar              |
+| `caddq`              | Suma `Q` si el valor es negativo, llevándolo a `[0, Q)`     | Después de restas que pueden dar negativo   |
 
-Estas cuatro funciones son los **cimientos**. Todo lo que venga después (la NTT en Fase 2, los polinomios en Fase 3, las firmas en Fase 5) las invocará miles de veces.
+Estas cuatro funciones son los **cimientos**. Todo lo que venga después — la NTT en Fase 2, la aritmética de vectores y matrices en Fase 3, la generación y verificación de firmas en Fase 5 — las invocará decenas de miles de veces por operación criptográfica. Una regresión de rendimiento del 5% en una de estas funciones se traduciría en un impacto observable en el tiempo total de firma.
 
 ### ¿Por qué no usar simplemente `a % Q`?
 
-Tres razones fundamentales:
+Esta es una pregunta que parece obvia pero cuya respuesta tiene tres capas, cada una más profunda que la anterior.
 
-1. **Rendimiento:** La operación de módulo (`%`) en hardware se traduce en una instrucción de **división entera**, que es enormemente lenta en procesadores embebidos de 32 bits (puede costar 20-40 ciclos frente a 1-3 ciclos de una suma o shift).
-2. **Seguridad:** La instrucción de división en muchos procesadores tarda un tiempo variable dependiendo del valor de los operandos. Esto filtra información secreta por un **canal lateral de tiempo**.
-3. **Desbordamiento:** Cuando multiplicamos dos coeficientes de 23 bits, el resultado puede tener hasta 46 bits. No cabe en un `int32_t` y necesitamos técnicas especiales para "traerlo de vuelta" a 32 bits.
+#### Razón 1: Rendimiento — la división es el cuello de botella
 
-Por estas tres razones, reemplazamos **toda** la aritmética modular por técnicas especializadas: Montgomery y Barrett.
+La operación de módulo (`%`) en hardware se traduce en una instrucción de **división entera** (`SDIV` en ARM, `IDIV` en x86). Esta instrucción es, con diferencia, la más lenta de la ALU en procesadores embebidos de 32 bits:
+
+- Un `ADD` o `SUB` tarda **1 ciclo**.
+- Un `SHL` (shift) tarda **1 ciclo**.
+- Un `MUL` tarda **3-5 ciclos** en procesadores modernos.
+- Un `SDIV` tarda **20-40 ciclos** incluso en Cortex-M4, y hasta **70+ ciclos** en procesadores más simples como el Cortex-M0.
+
+En la NTT de ML-DSA, se realizan **1024 butterflies**, cada una con una multiplicación modular. Si cada módulo costase 30 ciclos en vez de 1-3, el tiempo de ejecución de la NTT se multiplicaría aproximadamente por 10-20. En un sistema embebido corriendo a 64 MHz, eso puede ser la diferencia entre una firma en 5 ms y una firma en 100 ms.
+
+#### Razón 2: Seguridad — los canales laterales de tiempo
+
+La instrucción de división en muchos procesadores tarda un tiempo que **depende del valor de los operandos** (dependencia de datos). Esto es una catástrofe para la criptografía.
+
+Imagina que un atacante puede medir con precisión el tiempo que tarda tu dispositivo en generar una firma. Si la duración varía según el valor interno de los coeficientes, el atacante puede hacer miles de mediciones y, mediante análisis estadístico, inferir bits de la clave privada. Este tipo de ataque es real, práctico y ha comprometido implementaciones de OpenSSL, libgcrypt y otras bibliotecas en el pasado.
+
+Por eso, **toda** la aritmética modular de `el_pedestal` debe ejecutar exactamente el mismo número de ciclos independientemente del valor de los datos — lo que llamamos **tiempo constante** (*constant-time*). Las técnicas de Montgomery y Barrett, implementadas con shifts y operaciones de bits, tienen duración completamente predecible. La instrucción `SDIV` no.
+
+#### Razón 3: Desbordamiento — los números no caben en 32 bits
+
+Cuando multiplicamos dos coeficientes, el resultado puede necesitar hasta 47 bits:
+
+```
+a_max = Q - 1 = 8 380 416    (23 bits)
+b_max = Q - 1 = 8 380 416    (23 bits)
+a_max × b_max = 70 231 374 530 304   (47 bits, necesita ceil(log2(70 231 374 530 304)) = 47 bits)
+```
+
+Un `int32_t` solo tiene 32 bits. El producto **no cabe**. Necesitamos un `int64_t` para almacenar el producto intermedio, y técnicas especiales para reducirlo de vuelta a 32 bits sin perder la corrección modular. `a % Q` en 32 bits simplemente daría un resultado erróneo por desbordamiento antes siquiera de llegar al módulo.
+
+### Las tres amenazas que la Fase 1 neutraliza
+
+En resumen, la Fase 1 existe para neutralizar tres amenazas simultáneas:
+
+| Amenaza              | Consecuencia si no la neutralizamos           | Solución implementada                |
+|----------------------|----------------------------------------------|--------------------------------------|
+| Lentitud de división | NTT demasiado lenta para uso práctico        | Montgomery (shifts) + Barrett (shifts) |
+| Canal lateral de tiempo | Fuga de clave privada por análisis de tiempo | Código sin branches condicionales   |
+| Desbordamiento de 32 bits | Resultados incorrectos en multiplicaciones | Reducción en 64 bits con `int64_t`  |
+
+Ninguna de estas amenazas puede ignorarse. Un sistema que falla en cualquiera de ellas no sirve para criptografía real, aunque matemáticamente parezca correcto.
+
+Con este panorama claro, es el momento de adentrarse en el universo matemático concreto donde toda esta aritmética ocurre.
 
 ---
 
@@ -82,9 +148,9 @@ Este número no fue elegido al azar. Es el primo que define el estándar ML-DSA 
 
 1. **Es primo.** Esto garantiza que `Z_Q` sea un cuerpo (no solo un anillo), lo que significa que todo elemento no nulo tiene inverso multiplicativo. Puedes "dividir" sin problemas.
 
-2. **Q ≡ 1 (mod 256).** Esta propiedad es **crucial** para la Fase 2 (NTT). Significa que existen raíces primitivas de la unidad de orden 256 dentro de `Z_Q`. Sin esta propiedad, la NTT de longitud 256 que necesita ML-DSA sería imposible sobre este cuerpo.
+2. **Q ≡ 1 (mod 256).** Esta propiedad es **crucial** para la Fase 2 (NTT). Más precisamente, dado que la NTT de ML-DSA trabaja sobre el anillo `Z_Q[X] / (X^256 + 1)` (el anillo ciclotómico, ver Sección 11), necesitamos raíces de orden **512** en `Z_Q` (no de orden 256). Que `Q ≡ 1 (mod 256)` implica `512 | (Q-1)`, lo que garantiza la existencia de esos elementos. Sin esta propiedad, la NTT completa sería imposible sobre este cuerpo.
 
-   > **¿Qué es una raíz de la unidad?** Una raíz *n*-ésima de la unidad en `Z_Q` es un número `w` tal que `w^n ≡ 1 (mod Q)` pero `w^k ≢ 1 (mod Q)` para todo `0 < k < n`. Es el equivalente modular de los números complejos `e^(2πi/n)` que se usan en la FFT clásica. La propiedad `Q ≡ 1 (mod 256)` garantiza, por un resultado de la teoría de grupos (el grupo multiplicativo `Z_Q*` es cíclico de orden `Q-1`), que existe un elemento de orden exactamente 256. Ese elemento es la "raíz zeta" que usaremos en la NTT de Fase 2.
+   > **¿Qué es una raíz de la unidad?** Una raíz *n*-ésima de la unidad en `Z_Q` es un número `w` tal que `w^n ≡ 1 (mod Q)` pero `w^k ≢ 1 (mod Q)` para todo `0 < k < n`. Es el equivalente modular de los números complejos `e^(2πi/n)` que se usan en la FFT clásica. La propiedad `Q ≡ 1 (mod 256)` garantiza (porque `Q - 1 = 2^13 × 1023`, que es divisible por `512 = 2^9`) que el grupo cíclico `Z_Q*` contiene elementos de orden exactamente 512. Esos elementos son las raíces "zeta" que usaremos en la NTT de Fase 2.
 
 3. **Q cabe en 23 bits.** Dado que `Q = 8 380 417 < 2^23 = 8 388 608`, un coeficiente reducido cabe holgadamente en un `int32_t` de 32 bits. Esto nos deja **9 bits de margen** antes de desbordar, lo que permite acumular varias sumas sin tener que reducir después de cada operación.
 
@@ -113,6 +179,8 @@ Hay dos formas de representar los elementos de `Z_Q`:
 - La **reducción de Barrett** produce resultados en el rango centrado `[-Q/2, Q/2]`. Esto es útil porque permite hacer **varias operaciones seguidas** (sumas, restas) sin reducir entre medias, ya que los valores centrados son más pequeños en valor absoluto.
 - La función `conditional_subq` produce resultados en el rango canónico `[0, Q)`. Esto es necesario al final, cuando hay que **serializar** los coeficientes para enviarlos por la red o almacenarlos.
 
+Conocemos ya el universo aritmético y sus dos representaciones. El siguiente problema es inmediato y práctico: una multiplicación entre dos coeficientes de este universo produce un número que no cabe en un registro de 32 bits.
+
 ---
 
 ## 3. El Problema del Desbordamiento
@@ -127,21 +195,36 @@ b_max = Q - 1 = 8 380 416    (23 bits)
 a_max * b_max = 70 231 374 530 304    (47 bits)
 ```
 
-El producto de dos coeficientes de 23 bits necesita **hasta 47 bits**. Un `int32_t` solo tiene 32 bits (31 bits + signo). No cabe. Necesitamos un `int64_t` para almacenar el producto intermedio, y después debemos **reducirlo** de vuelta a 32 bits.
+El producto de dos coeficientes de 23 bits necesita **hasta 47 bits**. Un `int32_t` solo tiene 32 bits (31 bits + signo). No cabe. Necesitamos un `int64_t` para almacenar el producto intermedio, y después debemos **reducirlo** de vuelta a 32 bits. Pero esa reducción no puede ser un simple `% Q` por las razones que ya vimos en la Sección 1 — debe ser una operación eficiente y de tiempo constante.
+
+### ¿Por qué no simplemente usar `int64_t` siempre?
+
+Podrías pensar: «si el producto no cabe en 32 bits, ¿por qué no usar `int64_t` para todo?». La respuesta es triple:
+
+1. **Coste en registros:** Los procesadores de 32 bits (ARM Cortex-M4, por ejemplo) solo tienen registros de 32 bits. Cada operación con `int64_t` se expande a **dos instrucciones de 32 bits** (con manejo del carry). Todas las sumas, restas y comparaciones se duplican en coste.
+2. **Coste en memoria:** El array de 256 coeficientes pasaría de `256 × 4 = 1 KiB` a `256 × 8 = 2 KiB`. En un microcontrolador con 32 KiB de RAM total, esto puede ser un problema real cuando tienes matrices de polinomios en vuelo simultáneamente.
+3. **Innecesario:** Con las técnicas correctas (Montgomery y Barrett), podemos trabajar en 32 bits para *almacenar* los coeficientes y solo usar 64 bits *temporalmente* durante los productos intermedios. Es el mejor de ambos mundos.
 
 ### Las dos estrategias de reducción
 
 Para traer ese número grande de vuelta al rango de `Z_Q`, tenemos dos técnicas distintas, cada una optimizada para un caso de uso diferente:
 
-| Técnica       | Entrada típica  | Salida             | Cuándo se usa                          |
-|---------------|----------------|--------------------|----------------------------------------|
-| **Montgomery** | `int64_t` (producto de 64 bits) | `int32_t` en `[-Q, Q]`  | Después de multiplicar dos coeficientes |
-| **Barrett**    | `int32_t` (suma/acumulación)    | `int32_t` en `[-Q/2, Q/2]` | Después de sumar/acumular coeficientes  |
+| Técnica       | Entrada típica                  | Salida                      | Cuándo se usa                           |
+|---------------|--------------------------------|-----------------------------|-----------------------------------------|
+| **Montgomery** | `int64_t` (producto de 64 bits) | `int32_t` en `[-Q, Q]`     | Después de multiplicar dos coeficientes |
+| **Barrett**    | `int32_t` (suma/acumulación)   | `int32_t` en `[-Q/2, Q/2]` | Después de sumar/acumular coeficientes  |
 
-**¿Por qué dos técnicas y no una sola?**
+#### ¿Por qué dos técnicas y no una sola?
 
-- **Montgomery** es ideal para multiplicaciones porque acepta entradas de 64 bits. Pero tiene un "precio": opera en un "dominio especial" (el dominio de Montgomery) que añade un factor de escala `2^32`. Esto es irrelevante cuando haces muchas multiplicaciones seguidas (el factor se cancela), pero sería un estorbo para operaciones simples.
-- **Barrett** es ideal para reducciones simples de 32 bits (tras sumas o restas acumuladas). Es directa: la entrada y la salida están en el "dominio normal" sin factores de escala extraños.
+Porque cada técnica está optimizada para un tipo de operación distinto, y usarlas fuera de su dominio natural sería ineficiente o incorrecto:
+
+- **Montgomery** es ideal para multiplicaciones porque acepta entradas de 64 bits. Pero tiene un "precio": opera en un "dominio especial" que añade un factor de escala `R = 2^32` a todos los valores. Este factor no es un problema cuando haces muchas multiplicaciones encadenadas (se cancela en cada butterfly de la NTT), pero sería un estorbo para operaciones simples como sumar coeficientes.
+
+- **Barrett** es ideal para reducciones simples de 32 bits (tras sumas o restas acumuladas). No requiere cambio de dominio: la entrada y la salida están en el dominio normal. Su debilidad es que solo acepta entradas en rangos moderados (32 bits), no el producto completo de 64 bits de dos coeficientes.
+
+- **Juntas** cubren todos los casos del algoritmo sin solapamiento ni lagunas. Cada `montgomery_reduce` en la NTT va seguido eventualmente de operaciones de suma/resta que se normalizan con `barrett_reduce`. El diseño es limpio y sin redundancias.
+
+Analizadas las dos estrategias, comencemos por la más especializada: la reducción de Montgomery, que resuelve el caso de los productos de 64 bits.
 
 ---
 
@@ -267,7 +350,7 @@ Es fundamental entender que el dominio de Montgomery no es "gratis": tiene un co
 2. **Operaciones dentro del dominio:** Cada multiplicación `coef * zeta_mont` seguida de `montgomery_reduce` produce el resultado correcto dentro del dominio. No hay coste extra de conversión.
 3. **Salida del dominio:** Al final de la NTT inversa, se multiplica cada coeficiente por `f = mont^{-1} mod Q` (el factor de normalización, que incorpora tanto la escala `1/256` de la INTT como la des-conversión de Montgomery), seguido de una `montgomery_reduce`. Esto devuelve los coeficientes al dominio normal.
 
-El ahorro neto es enorme: **256 conversiones de entrada (precomputadas off-line) + 256 conversiones de salida** frente a **256 × 7 = 1792 multiplicaciones** que se benefician del shift barato de Montgomery.
+El ahorro neto es enorme: **256 conversiones de entrada (precomputadas off-line) + 256 conversiones de salida** frente a las **8 capas × 128 butterflies = 1024 multiplicaciones** de la NTT directa (más otras 1024 de la INTT y 256 del pointwise) que se benefician del shift barato de Montgomery, sin coste adicional de conversión en tiempo de ejecución.
 
 ### Ejemplo numérico completo: Montgomery de principio a fin
 
@@ -280,7 +363,7 @@ coef2 = 8 000 000
 Producto de 64 bits: 8 000 000 × 8 000 000 = 64 000 000 000 000
 ```
 
-Este producto tiene 46 bits. No cabe en 32 bits. Aplicamos `montgomery_reduce`:
+Este producto tiene 47 bits. No cabe en 32 bits. Aplicamos `montgomery_reduce`:
 
 **Paso 1 — Factor corrector:**
 ```
@@ -288,11 +371,11 @@ a = 64 000 000 000 000
 a_low = a mod 2^32 = 64 000 000 000 000 mod 4 294 967 296
 
 64 000 000 000 000 / 4 294 967 296 ≈ 14 901.16...
-14 901 × 4 294 967 296 = 63 997 384 022 496
-a_low = 64 000 000 000 000 - 63 997 384 022 496 = 2 615 977 504
+14 901 × 4 294 967 296 = 63 999 307 677 696
+a_low = 64 000 000 000 000 - 63 999 307 677 696 = 692 322 304
 
 t = a_low * QINV  (mod 2^32)
-  = 2 615 977 504 * 58 728 449  (mod 2^32)
+  = 692 322 304 * 58 728 449  (mod 2^32)
 ```
 
 El valor exacto de `t` se obtiene truncando la multiplicación de 32×32 bits a 32 bits (desbordamiento natural en C).
@@ -316,7 +399,15 @@ int64_t producto_gigante = (int64_t)8000000 * 8000000;  // = 64 000 000 000 000
 int32_t r5 = montgomery_reduce(producto_gigante);
 ```
 
-El resultado `r5` satisface: `r5 ≡ 64 000 000 000 000 × 2^(-32) (mod Q)`. Esto significa que `r5` es la representación en el dominio de Montgomery del producto `8 000 000 × 8 000 000 mod Q`, escalado por `2^(-32)`.
+El resultado `r5` satisface: `r5 ≡ 64 000 000 000 000 × R⁻¹ (mod Q)`. En otras palabras, `r5` es el producto `8 000 000 × 8 000 000 mod Q` expresado en el dominio de Montgomery, listo para ser usado en la siguiente butterfly sin necesidad de conversión adicional. El test del proyecto verifica que este valor es correcto, lo que confirma que la cadena `a_low → t → a - t·Q → >>32` funciona sin errores de desbordamiento ni de corrección algebraica.
+
+**Puntos clave — Reducción de Montgomery:**
+- `montgomery_reduce(a)` calcula `a · R⁻¹ mod Q` donde `R = 2^32`, usando solo un shift y operaciones de 32 bits.
+- `QINV = Q⁻¹ mod 2^32` garantiza que los 32 bits inferiores de `a − t·Q` son siempre cero, haciendo el shift `>> 32` exacto (sin pérdida de información).
+- Las zetas se precomputan con factor `R` para que ese factor se cancele en cada butterfly, sin coste en tiempo de ejecución.
+- La salida pertenece a `[-Q, Q]`; puede necesitar `conditional_subq` como ajuste final antes de serializar.
+
+Montgomery resuelve brillantemente el caso de las multiplicaciones, pero no ayuda cuando la entrada es ya un `int32_t` moderado, como ocurre tras una suma. Para ese caso usamos **Barrett**.
 
 ---
 
@@ -447,6 +538,14 @@ Dado que `t` es un entero, un error menor que 0.75 respecto al cociente real sig
 
 Barrett se usa para **reducir coeficientes individuales** después de sumas, restas o acumulaciones. Es la herramienta "de propósito general" para traer un valor de 32 bits al rango centrado, sin necesitar el dominio de Montgomery.
 
+**Puntos clave — Reducción de Barrett:**
+- `barrett_reduce(a)` aproxima `floor(a / Q)` con aritmética de punto fijo: `m = 8 ≈ 2^26 / Q`, lo que convierte la división en `a << 3` y `>> 26`.
+- La inyección de `2^25` convierte el truncamiento en redondeo, produciendo un residuo **centrado** en `[-Q/2, Q/2]` —no en `[0, Q)`—, lo que es esencial para la acumulación posterior.
+- El error del cociente estimado cumple siempre `|error| < 0.75`, es decir, `t` se desvía como máximo en `±1` del cociente exacto.
+- La salida centrada permite acumular hasta ~512 coeficientes Barrett antes de desbordar un `int32_t` (9 bits de margen).
+
+Barrett y Montgomery cubren la reducción en todos los escenarios. Pero una vez reducidos, los coeficientes aún pueden necesitar un ajuste fino para llegar exactamente al rango que requiere cada operación del algoritmo.
+
 ---
 
 ## 6. Reducciones Condicionales
@@ -509,6 +608,8 @@ int32_t caddq(int32_t a) {
 2. **Aplicar la corrección:** `return a + (Q & mask)`.
    - Si `a >= 0`: devuelve `a` intacto.
    - Si `a < 0`: devuelve `a + Q`, que ahora está en `[0, Q)`.
+
+Tenemos las cuatro herramientas aritméticas completas. Pero si las implementáramos con bifurcaciones `if` ordinarias, abriríamos la puerta a ataques devastadores de canal lateral. El siguiente apartado explica por qué y cómo escribirlas de forma **incondicionalmente segura**.
 
 ---
 
@@ -602,6 +703,14 @@ result = val_true & mask;
 
 Esto es exactamente lo que hacen `caddq` y `conditional_subq`.
 
+**Puntos clave — Seguridad de tiempo constante:**
+- Un `if` cuyo predicado depende de datos secretos filtra información vía *branch prediction* y la caché de instrucciones (I-Cache), incluso sin acceso físico al dispositivo.
+- La extensión de signo `x >> 31` genera `0x00000000` o `0xFFFFFFFF`: una máscara de bits que reemplaza al salto condicional con exactamente 3 instrucciones invariantes.
+- El patrón `x += Q & mask` ejecuta siempre las mismas instrucciones (`SAR`, `AND`, `ADD`), independientemente del valor de `x`, eliminando toda dependencia de datos observable.
+- El estándar C99 marca `>> 31` sobre `int32_t` como *implementation-defined*, pero en x86 (`sar`), ARM (`asr`) y RISC-V (`sra`) el desplazamiento aritmético es universal y es el comportamiento asumido por FIPS 204.
+
+Con el modelo de tiempo constante interiorizado, el siguiente apartado actúa de diccionario de consulta rápida: todas las constantes de la Fase 1 con su justificación en un solo lugar.
+
 ---
 
 ## 8. Mapa de Constantes
@@ -624,6 +733,8 @@ Q * QINV ≡ 1  (mod 2^32)     ← Definición del inverso de Montgomery
 m * Q = 8 * 8 380 417 = 67 043 336 ≈ 2^26 = 67 108 864    ← Aproximación de Barrett
 2^26 - 8*Q = 65 528          ← Error absoluto de la aproximación (< Q)
 ```
+
+Las constantes son los cimientos numéricos. Con ellas en mano, veamos ahora cómo todas las piezas se mueven juntas en el flujo de vida de un coeficiente real del algoritmo.
 
 ---
 
@@ -702,8 +813,9 @@ Eso significa que podemos **acumular** (sumar) hasta `2^9 = 512` coeficientes re
 
 En la práctica, la NTT de ML-DSA hace como máximo **una suma o resta entre cada multiplicación** (la mariposa butterfly: `a + w*b` y `a - w*b`). Tras la multiplicación `w*b` aplicamos `montgomery_reduce`, que devuelve `|res| ≤ Q`. Luego sumamos/restamos con `a` (también `|a| ≤ Q`), obteniendo `|resultado| ≤ 2Q ≈ 2^24`. Muy lejos del límite de `2^31`.
 
-
 Este diseño evita reducciones innecesarias y maximiza el rendimiento sin sacrificar la corrección.
+
+La Fase 1 ha construido los cimientos: cuatro funciones aritméticas correctas, eficientes y de tiempo constante. Con ellas bajo el brazo, la Fase 2 puede acometer el problema central de ML-DSA: multiplicar polinomios de grado 255 de forma prácticable en un microcontrolador.
 
 ---
 ---
@@ -758,6 +870,8 @@ Si conoces la FFT (Fast Fourier Transform), la NTT es **exactamente lo mismo**, 
 
 La ventaja de la NTT sobre la FFT es que no hay errores de redondeo de punto flotante: todo es aritmética entera exacta.
 
+El núcleo de que la NTT funcione es la existencia de ciertas raíces especiales en `Z_Q`. Antes de escribir un solo bucle, necesitamos entender qué son exactamente y por qué tienen orden 512 y no 256.
+
 ---
 
 ## 11. Las raíces de la unidad: el corazón de la NTT
@@ -806,6 +920,8 @@ El hecho de que `ζ^256 = -1` (y no 1) confirma que el orden es exactamente 512.
 Porque `Q - 1 = 8 380 416 = 2^13 × 1023`. Dado que `512 = 2^9` divide a `Q - 1` (y `9 ≤ 13`), el grupo multiplicativo `Z_Q*` (que es cíclico de orden `Q - 1`) contiene elementos de orden exactamente 512.
 
 > **Demostración formal:** [`MATH_PROOFS.md`, Demostración 8](MATH_PROOFS.md#demostración-8-existencia-y-orden-de-la-raíz-de-la-unidad-zeta--1753)
+
+Ya conocemos `ζ`. Toda la NTT gira en torno a sus potencias. La pregunta es cómo organizarlas en memoria para que los bucles puedan acceder a ellas con la máxima eficiencia posible.
 
 ---
 
@@ -867,6 +983,8 @@ montgomery_reduce(zeta_mont * b) = (ζ·R · b) / R = ζ · b  (mod Q)
 
 Resultado limpio, sin factores de Montgomery residuales. Las 256 conversiones se pagan **una sola vez** (off-line, en `generate_zetas.py`), y las 1792 multiplicaciones de la NTT se benefician.
 
+Con la tabla de zetas lista, podemos definir la operación más pequeña de toda la NTT: la mariposa (*butterfly*), el átomo del que está construido todo el edificio.
+
 ---
 
 ## 13. La operación mariposa (butterfly)
@@ -906,7 +1024,7 @@ a[j]       = a[j] + t;                                // a' = a + t
 
 **¿Por qué funciona?**
 1. Se calcula `t = ω · b mod Q` usando Montgomery (las zetas ya están en dominio Montgomery, así que el factor `R` se cancela).
-2. Se actualiza `a[j+len]` **antes** de `a[j]`. Esto es importante: se usa el valor original de `a[j]` en ambas líneas.
+2. La instrucción `a[j + len] = a[j] - t` se ejecuta **primero**, modificando `a[j+len]` con el valor aún intacto de `a[j]`. Luego `a[j] = a[j] + t` también usa el valor original de `a[j]` (que no ha sido modificado aún). El orden de las dos asignaciones es por tanto **fundamental**: si se invirtiese, `a[j+len]` usaría el `a[j]` ya modificado y el resultado sería incorrecto.
 3. El resultado es correcto módulo `Q`, y no se necesita reducción adicional porque los valores tienen suficiente margen (≤ `2Q`, que cabe en un `int32_t`).
 
 ### La butterfly inversa (Gentleman-Sande)
@@ -926,6 +1044,8 @@ a[j + len] = montgomery_reduce((int64_t)zeta * a[j + len]);  // b' = (-ω) · di
 - **`caddq` en la suma:** Sin esto, la suma `t + a[j+len]` podría producir valores negativos que se acumularían capa tras capa, causando desbordamiento.
 
 > **Demostración formal:** [`MATH_PROOFS.md`, Demostración 10](MATH_PROOFS.md#demostración-10-corrección-de-la-mariposa-de-cooley-tukey)
+
+Entendida la mariposa individual, podemos ver cómo 1024 de ellas se organizan en 8 capas coordinadas para completar la transformada completa.
 
 ---
 
@@ -1027,6 +1147,8 @@ Bloque 1 (zeta = ζ³):
 
 Este mismo patrón, escalado a 8 capas y 128 butterflies por capa, es lo que ocurre en la NTT de 256 elementos de `el_pedestal`.
 
+La NTT directa envía el polinomio al dominio de evaluación. Para recuperarlo, necesitamos la operación inversa: la INTT, que sigue la misma estructura pero recorre el camino en dirección opuesta.
+
 ---
 
 ## 15. La NTT inversa (INTT)
@@ -1059,6 +1181,8 @@ En la FFT clásica, la transformada inversa usa `e^(-2πi/N)` en lugar de `e^(+2
 En la INTT, la suma `t + a[j+len]` puede producir valores que crecen capa tras capa. Sin normalización, después de 8 capas los valores podrían desbordar un `int32_t`. La llamada a `caddq` mantiene los valores acotados al rango `[0, Q)` en cada iteración, previniendo el desbordamiento.
 
 > **Demostración formal:** [`MATH_PROOFS.md`, Demostración 11](MATH_PROOFS.md#demostración-11-la-intt-es-la-inversa-exacta-de-la-ntt)
+
+La INTT está estructuralmente completa, pero le falta una constante mágica que corrija el factor de escala acumulado a lo largo de toda la cadena de cálculo.
 
 ---
 
@@ -1124,6 +1248,14 @@ f = 8 347 681 × 2 365 951  mod  8 380 417  =  41 978
 
 > **Demostración formal:** [`MATH_PROOFS.md`, Demostración 12](MATH_PROOFS.md#demostración-12-derivación-de-la-constante-de-normalización-f--41978)
 
+**Puntos clave — Factor de normalización f = 41978:**
+- La cadena NTT → pointwise → INTT acumula exactamente **dos** factores `R⁻¹`: uno del pointwise y otro del `montgomery_reduce` final, por eso `f` necesita compensar `R²`.
+- `f = N⁻¹ · R² mod Q = 256⁻¹ · (2^32)² mod Q = 8 347 681 × 2 365 951 mod Q = 41 978`.
+- Este único valor unifica la des-normalización `÷256` y la conversión inversa de Montgomery en una sola multiplicación `montgomery_reduce(a[j] * f)`, sin ninguna operación adicional.
+- Si `f` estuviera mal calculado en un solo bit, `INTT(NTT(a)) ≠ a` y toda la multiplicación de polinomios sería silenciosamente incorrecta.
+
+Con `f = 41978` derivado, la única operación que falta por describir es la más sencilla de todas: la multiplicación componente a componente en el dominio NTT.
+
 ---
 
 ## 17. Multiplicación Pointwise
@@ -1160,7 +1292,9 @@ Este es el flujo completo de la multiplicación de polinomios en ML-DSA.
 
 ### ¿Cuánto cuesta?
 
-Solo **256 multiplicaciones** + 256 `montgomery_reduce`. Comparado con las 65 536 multiplicaciones del método directo, esto es un ahorro brutal, y es la única razón por la que ML-DSA es viable en hardware embebido de 32 bits.
+Solo **256 multiplicaciones** + 256 `montgomery_reduce`. Comparado con las 65 536 multiplicaciones del método directo, esto es un ahorro brutal, y es la única razón por la que ML-DSA es viable en hardware embebido de 32 bits.
+
+Tenemos todas las piezas del algoritmo. Veamos ahora cómo se ensamblan en el flujo completo de una multiplicación de polinomios de principio a fin.
 
 ---
 
