@@ -890,15 +890,23 @@ donde $(r_1, r_0) = \text{Decompose}(w'_j)$ y $m = (Q-1)/\alpha$.
 - Si $r_0 > 0$: devuelve $(r_1 + 1) \bmod m$.
 - Si $r_0 \leq 0$: devuelve $(r_1 - 1 + m) \bmod m$.
 
-**Prueba de que la dirección es correcta.** El residuo $r_0$ indica la posición de $w'_j$ dentro de su franja: $r_0 > 0$ significa que $w'_j$ está en la mitad superior, $r_0 \leq 0$ en la mitad inferior. Dado que el cruce de frontera fue causado por una perturbación pequeña $\delta = w'_j - w_j$:
+**Prueba de que la dirección es correcta.** Denotemos $\delta = w'_j - w_j$ la perturbación (pequeña). La franja $r_1 = k$ cubre los valores $r^+$ tales que $\text{Decompose}(r^+)$ devuelve $r_1 = k$, es decir, el rango centrado de ancho $\alpha$ alrededor de $k \cdot \alpha$. El residuo centrado $r_0 \in (-\gamma_2, \gamma_2]$ mide la distancia al centro: $r_0 > 0$ sitúa a $w'_j$ en la mitad superior (cerca del borde con la franja $k+1$), y $r_0 \leq 0$ en la mitad inferior (cerca del borde con la franja $k-1$).
 
-- Si $r_0 > 0$ (mitad superior): $w'_j$ cruzó la frontera **inferior** de la franja $r_1$ al entrar desde la franja $r_1 - 1$. Es decir, $w_j$ estaba en la franja $r_1 - 1$, y la perturbación positiva empujó $w'_j$ a la franja $r_1$. Entonces $\text{HighBits}(w_j) = (r_1 - 1 + m) \bmod m$. Pero `UseHint` devuelve $(r_1 + 1) \bmod m$... Esto parece contradictorio.
+Solo existen dos configuraciones que producen $h_j = 1$ (cruce de exactamente una frontera):
 
-  Reexaminemos: la convención opuesta también es consistente. `UseHint` no recupera $\text{HighBits}(w_j)$ deshaciendo el cruce, sino que ajusta $\text{HighBits}(w'_j)$ en la dirección que el firmante espera. La prueba formal de consistencia entre la dirección del ajuste y la recuperación correcta de $\text{HighBits}(\mathbf{Ay})$ se establece en el Lema 4.2 de Ducas et al. (CRYSTALS-Dilithium, 2018), que demuestra la relación:
+**Sub-caso A: $\delta < 0$ (cruce descendente).** El firmante tenía $w_j$ cerca del borde inferior de la franja $w_1$. La perturbación negativa empujó $w'_j$ hacia abajo, cruzando la frontera inferior. Por tanto $w'_j$ aterrizó en la parte alta de la franja $w_1 - 1$:
 
-$$\text{UseHint}(h, w'_j) = \text{HighBits}(w_j)$$
+$$r_1 = (w_1 - 1 + m) \bmod m, \qquad r_0 > 0 \text{ (mitad superior)}$$
 
-a partir de la identidad $w'_j = w_j + \delta_j$ con $|\delta_j| \leq \gamma_2$ y la estructura cíclica de las franjas de `Decompose`. La prueba procede por análisis exhaustivo de los cuatro sub-casos ($\delta > 0$ con $w_j$ en cada mitad, y $\delta < 0$ con $w_j$ en cada mitad), verificando que en cada caso la dirección elegida por el signo de $r_0$ coincide con la corrección necesaria. $\square$
+Necesitamos recuperar $w_1 = (r_1 + 1) \bmod m$. `UseHint` con $r_0 > 0$ devuelve exactamente $(r_1 + 1) \bmod m$. $\checkmark$
+
+**Sub-caso B: $\delta > 0$ (cruce ascendente).** El firmante tenía $w_j$ cerca del borde superior de la franja $w_1$. La perturbación positiva empujó $w'_j$ hacia arriba, cruzando la frontera superior. Por tanto $w'_j$ aterrizó en la parte baja de la franja $w_1 + 1$:
+
+$$r_1 = (w_1 + 1) \bmod m, \qquad r_0 \leq 0 \text{ (mitad inferior)}$$
+
+Necesitamos recuperar $w_1 = (r_1 - 1 + m) \bmod m$. `UseHint` con $r_0 \leq 0$ devuelve exactamente $(r_1 - 1 + m) \bmod m$. $\checkmark$
+
+En ambos sub-casos, la dirección del ajuste coincide con la corrección necesaria. No existen otros sub-casos: un cruce descendente siempre deja a $w'_j$ en la mitad superior de la franja destino (porque entró por arriba), y un cruce ascendente siempre lo deja en la mitad inferior (porque entró por abajo). $\square$
 
 ### Propiedad de acotación del peso del hint
 
