@@ -1,4 +1,4 @@
-# STUDY_GUIDE.md — Guía de Estudio Completa: Fases 1 y 2 de `el_pedestal`
+# STUDY_GUIDE.md — Guía de Estudio Completa: Fases 1, 2 y 3 de `el_pedestal`
 
 > **Propósito:** Este documento es tu recurso personal de estudio. Explica **todo** lo que ocurre en las Fases 1 y 2 del proyecto: qué hace cada pieza, **por qué** la necesitamos, y cómo encajan entre sí. Está pensado para que lo leas, lo releas y te sirva de referencia cuando necesites recordar cualquier concepto.
 >
@@ -57,6 +57,33 @@
 18. [El flujo completo de la multiplicación de polinomios](#18-el-flujo-completo-de-la-multiplicación-de-polinomios)
 19. [Mapa de Constantes — Fase 2](#19-mapa-de-constantes--fase-2)
 20. [Verificación de integridad: el test NTT → INTT](#20-verificación-de-integridad-el-test-ntt--intt)
+
+**Fase 3 — Polinomios, Vectores y Compresión:**
+
+21. [Del array al struct: el tipo `poly`](#21-del-array-al-struct-el-tipo-poly)
+    - [Por qué necesitamos un contenedor formal](#por-qué-necesitamos-un-contenedor-formal)
+    - [Los vectores `polyvecl` y `polyveck`](#los-vectores-polyvecl-y-polyveck)
+22. [Las dimensiones de ML-DSA: los tres niveles de seguridad](#22-las-dimensiones-de-ml-dsa-los-tres-niveles-de-seguridad)
+    - [La tabla de parámetros de FIPS 204](#la-tabla-de-parámetros-de-fips-204)
+    - [Huella de memoria: cuánta RAM consume una firma](#huella-de-memoria-cuánta-ram-consume-una-firma)
+23. [Aritmética de vectores: NTT y producto interno](#23-aritmética-de-vectores-ntt-y-producto-interno)
+    - [Propagar la NTT sobre un vector](#propagar-la-ntt-sobre-un-vector)
+    - [El producto interno en dominio NTT](#el-producto-interno-en-dominio-ntt)
+    - [Control de desbordamiento en la acumulación](#control-de-desbordamiento-en-la-acumulación)
+24. [¿Por qué comprimir? El problema del tamaño de la firma](#24-por-qué-comprimir-el-problema-del-tamaño-de-la-firma)
+25. [Power2Round: el bisturí de los 13 bits](#25-power2round-el-bisturí-de-los-13-bits)
+    - [La operación paso a paso](#la-operación-paso-a-paso-1)
+    - [Mapa de bits de un coeficiente](#mapa-de-bits-de-un-coeficiente)
+26. [Decompose, HighBits y LowBits: dividir por α](#26-decompose-highbits-y-lowbits-dividir-por-α)
+    - [Por qué α no es potencia de 2](#por-qué-α-no-es-potencia-de-2)
+    - [El corner case de Q − 1](#el-corner-case-de-q--1)
+    - [¿Y el tiempo constante?](#y-el-tiempo-constante)
+27. [El mecanismo de Hints: cómo corregir el acarreo](#27-el-mecanismo-de-hints-cómo-corregir-el-acarreo)
+    - [El problema de la frontera](#el-problema-de-la-frontera)
+    - [MakeHint: el firmante detecta el carry](#makehint-el-firmante-detecta-el-carry)
+    - [UseHint: el verificador corrige](#usehint-el-verificador-corrige)
+28. [El flujo completo de Sign y Verify con compresión](#28-el-flujo-completo-de-sign-y-verify-con-compresión)
+29. [Mapa de Constantes — Fase 3](#29-mapa-de-constantes--fase-3)
 
 ---
 
@@ -1427,5 +1454,609 @@ Si `errores == 0`, la NTT y la INTT son inversas exactas, lo que confirma que:
 - No hay desbordamientos en ninguna capa.
 
 ---
+---
 
-*Guía de estudio personal — Fases 1 y 2 | `el_pedestal` | ML-DSA bare-metal en C99 de 32 bits*
+# Fase 3: Polinomios, Vectores y Compresión
+
+---
+
+## 21. Del array al struct: el tipo `poly`
+
+### Por qué necesitamos un contenedor formal
+
+Durante las Fases 1 y 2, un polinomio era simplemente un array desnudo: `int32_t a[256]`. Cada función recibía un puntero `int32_t *`, y el programador debía recordar que apuntaba a exactamente 256 enteros. Esto funcionó mientras solo existían funciones aisladas como `poly_ntt` o `poly_invntt`, pero a partir de ahora vamos a manejar **vectores de polinomios** (arrays de arrays) y funciones que reciben y devuelven múltiples polinomios. Un puntero desnudo `int32_t *` se vuelve peligroso.
+
+Considera este error silencioso:
+
+```c
+void funcion_peligrosa(int32_t *a, int32_t *b);
+// ¿Es 'a' un solo polinomio? ¿Un vector de 4 polinomios?
+// ¿Tiene 256 elementos o 1024? No hay forma de saberlo.
+```
+
+La solución es encapsular el array en un `struct`:
+
+```c
+#define N 256
+
+typedef struct {
+    int32_t coeffs[N];
+} poly;
+```
+
+Este cambio parece trivial — el `struct` contiene exactamente los mismos 256 enteros, ocupa exactamente los mismos 1 024 bytes, y el compilador no inserta ningún padding adicional (un `struct` con un único miembro no necesita alineación extra). Pero las ventajas son reales:
+
+1. **Tipado fuerte.** Si una función espera `poly *`, el compilador rechaza un `int32_t *` accidental. Si espera `polyvecl *` (un vector de `L` polinomios), rechaza un `poly *`. Los errores se detectan en compilación, no en runtime.
+
+2. **Claridad semántica.** Al leer `void poly_add(poly *r, const poly *a, const poly *b)`, sabes inmediatamente que cada argumento es un polinomio completo de 256 coeficientes. No necesitas contar manualmente los tamaños.
+
+3. **Composición.** Puedes construir tipos más grandes a partir de `poly`:
+
+```c
+typedef struct {
+    poly vec[L];    /* L polinomios: un vector de dimensión L */
+} polyvecl;
+```
+
+A partir de la Fase 3, todas las funciones nuevas usan `poly *` en lugar de `int32_t *`. Las funciones de la Fase 2 (`poly_ntt`, `poly_invntt`) se adaptarán eventualmente al nuevo tipo; el cambio es puramente mecánico (sustituir `a[i]` por `a->coeffs[i]`).
+
+### Los vectores `polyvecl` y `polyveck`
+
+ML-DSA no trabaja con un solo polinomio: trabaja con **vectores** y **matrices** de polinomios. Las dimensiones de esos vectores dependen del nivel de seguridad elegido y se designan con las letras $k$ y $\ell$:
+
+- Un **`polyvecl`** es un vector de $\ell$ polinomios. Almacena la clave secreta $\mathbf{s}_1$, el enmascaramiento $\mathbf{y}$, y la firma $\mathbf{z}$.
+- Un **`polyveck`** es un vector de $k$ polinomios. Almacena la clave pública $\mathbf{t}$, la clave secreta $\mathbf{s}_2$, el compromiso $\mathbf{w}$, y el vector de hints $\mathbf{h}$.
+- La **matriz $\mathbf{A}$** tiene dimensión $k \times \ell$. Cada elemento es un polinomio.
+
+```c
+typedef struct {
+    poly vec[L];
+} polyvecl;
+
+typedef struct {
+    poly vec[K];
+} polyveck;
+```
+
+Donde `K` y `L` son constantes definidas en tiempo de compilación según el nivel de seguridad.
+
+---
+
+## 22. Las dimensiones de ML-DSA: los tres niveles de seguridad
+
+### La tabla de parámetros de FIPS 204
+
+El estándar FIPS 204 define tres conjuntos de parámetros, nombrados por la concatenación $k\ell$:
+
+| Parámetro        | ML-DSA-44   | ML-DSA-65    | ML-DSA-87    | ¿Qué controla?                           |
+|------------------|-------------|--------------|--------------|-------------------------------------------|
+| **Seguridad**    | Nivel 2     | Nivel 3      | Nivel 5      | Equivalente clásico: 128/192/256 bits     |
+| $k$              | 4           | 6            | 8            | Filas de $\mathbf{A}$, longitud de $\mathbf{t}$ |
+| $\ell$           | 4           | 5            | 7            | Columnas de $\mathbf{A}$, longitud de $\mathbf{s}_1$ |
+| $\eta$           | 2           | 4            | 2            | Cota de los coeficientes de las claves secretas |
+| $d$              | 13          | 13           | 13           | Bits que descarta `Power2Round` (fijo)    |
+| $\gamma_1$       | $2^{17}$    | $2^{19}$     | $2^{19}$     | Rango del muestreo del enmascaramiento $\mathbf{y}$ |
+| $\gamma_2$       | 95 232      | 261 888      | 261 888      | Divisor de `Decompose`                   |
+| $\tau$           | 39          | 49           | 60           | Peso del polinomio de desafío $c$        |
+| $\omega$         | 80          | 55           | 75           | Máximo de hints activos en la firma       |
+
+Los valores de $\gamma_2$ no son arbitrarios. Son divisores exactos de $Q - 1$:
+
+```
+ML-DSA-44:  γ₂ = (Q - 1) / 88  = 8 380 416 / 88  = 95 232
+ML-DSA-65:  γ₂ = (Q - 1) / 32  = 8 380 416 / 32  = 261 888
+ML-DSA-87:  γ₂ = (Q - 1) / 32  = 261 888  (igual que ML-DSA-65)
+```
+
+Que $2\gamma_2$ divida a $Q - 1$ es un requisito algebraico: garantiza que la descomposición `Decompose` cubra todos los valores de $\mathbb{Z}_Q$ sin dejar huecos ni solapamientos.
+
+La selección del nivel de seguridad se realiza en tiempo de compilación, no en runtime. En el código esto se traduce en un bloque de `#define` condicional que selecciona una u otra familia de constantes según el valor de `DILITHIUM_MODE`. Esto permite al compilador tratar todas las dimensiones como constantes conocidas, lo que habilita optimizaciones agresivas (desenrollado de bucles, eliminación de código muerto para los niveles no seleccionados).
+
+### Huella de memoria: cuánta RAM consume una firma
+
+Cada `poly` ocupa $256 \times 4 = 1\,024$ bytes (1 KiB). A partir de ahí, la aritmética es directa:
+
+```
+polyvecl:  L × 1 KiB    (ML-DSA-44: 4 KiB,  ML-DSA-87: 7 KiB)
+polyveck:  K × 1 KiB    (ML-DSA-44: 4 KiB,  ML-DSA-87: 8 KiB)
+```
+
+Durante la operación de firma (`Sign`), el algoritmo necesita tener en vuelo simultáneamente varias de estas estructuras. La siguiente tabla muestra una estimación del pico de uso de RAM durante la firma:
+
+| Variable en vuelo       | Tipo        | ML-DSA-44 | ML-DSA-87 |
+|-------------------------|-------------|-----------|----------|
+| $\mathbf{s}_1$ (clave secreta) | `polyvecl` | 4 KiB | 7 KiB |
+| $\mathbf{s}_2$ (clave secreta) | `polyveck` | 4 KiB | 8 KiB |
+| $\mathbf{t}_0$ (parte baja de t) | `polyveck` | 4 KiB | 8 KiB |
+| $\mathbf{y}$ (enmascaramiento) | `polyvecl` | 4 KiB | 7 KiB |
+| $\mathbf{w}$ (compromiso) | `polyveck` | 4 KiB | 8 KiB |
+| $\mathbf{z}$ (firma) | `polyvecl` | 4 KiB | 7 KiB |
+| $\mathbf{h}$ (hints) | `polyveck` | 4 KiB | 8 KiB |
+| **Total aproximado** | | **~28 KiB** | **~53 KiB** |
+
+Estas cifras excluyen la matriz $\mathbf{A}$ y los buffers de hash. En un microcontrolador con 128 KiB de SRAM (como un STM32F4), 28 KiB es manejable pero requiere disciplina. 53 KiB ya consume casi la mitad de la RAM disponible.
+
+**Tres estrategias para sobrevivir en el stack:**
+
+1. **Sin `malloc`.** Toda la memoria se declara como variables locales (stack) o como `static`. No existe heap.
+2. **Reutilización.** Las variables cuya vida útil no se solapa comparten espacio de stack. Por ejemplo, $\mathbf{y}$ se sobreescribe con $\mathbf{z}$ (la firma es $\mathbf{z} = \mathbf{y} + c \cdot \mathbf{s}_1$, así que $\mathbf{y}$ ya no se necesita cuando $\mathbf{z}$ existe).
+3. **Generación fila a fila de $\mathbf{A}$.** La matriz $\mathbf{A}$ tiene $k \times \ell$ polinomios (16 KiB para ML-DSA-44). En lugar de materializarla entera, generamos una fila ($\ell$ polinomios), la usamos para un producto interno, y la descartamos antes de generar la siguiente. Coste: 1 `polyvecl` temporal en vez de $k$ de ellos.
+
+---
+
+## 23. Aritmética de vectores: NTT y producto interno
+
+### Propagar la NTT sobre un vector
+
+Transformar un vector de polinomios al dominio NTT es conceptualmente trivial: simplemente se aplica `poly_ntt` a cada componente del vector de forma independiente. No hay interacción entre los polinomios del vector durante la transformación.
+
+```c
+void polyvecl_ntt(polyvecl *v) {
+    unsigned int i;
+    for (i = 0; i < L; ++i)
+        poly_ntt(v->vec[i].coeffs);
+}
+```
+
+Lo mismo para `polyveck_ntt`. La INTT se propaga del mismo modo con `poly_invntt`.
+
+### El producto interno en dominio NTT
+
+La operación central de ML-DSA es el producto de la matriz $\mathbf{A}$ (dimensión $k \times \ell$) por un vector $\mathbf{s}$ (dimensión $\ell$). El resultado es un vector de dimensión $k$, donde cada componente es un **producto interno**:
+
+$$t_i = \sum_{j=0}^{\ell - 1} A_{ij} \cdot s_j$$
+
+En el dominio de coeficientes, cada multiplicación $A_{ij} \cdot s_j$ sería una convolución $O(N^2)$. Pero en el dominio NTT, es una multiplicación pointwise $O(N)$, y la suma de polinomios es coeficiente a coeficiente. El producto interno completo se acumula en un polinomio resultado:
+
+```c
+void polyvecl_pointwise_acc(poly *r, const poly *row, const polyvecl *b) {
+    unsigned int i;
+    poly t;
+
+    /* Primer término: r = row[0] * b[0] */
+    poly_mul_pointwise(r->coeffs, row[0].coeffs, b->vec[0].coeffs);
+
+    /* Acumular los siguientes: r += row[i] * b[i] */
+    for (i = 1; i < L; ++i) {
+        poly_mul_pointwise(t.coeffs, row[i].coeffs, b->vec[i].coeffs);
+        poly_add(r, r, &t);
+    }
+}
+```
+
+Donde `poly_add` y `poly_sub` son las operaciones triviales coeficiente a coeficiente:
+
+```c
+void poly_add(poly *r, const poly *a, const poly *b) {
+    unsigned int i;
+    for (i = 0; i < N; ++i)
+        r->coeffs[i] = a->coeffs[i] + b->coeffs[i];
+}
+
+void poly_sub(poly *r, const poly *a, const poly *b) {
+    unsigned int i;
+    for (i = 0; i < N; ++i)
+        r->coeffs[i] = a->coeffs[i] - b->coeffs[i];
+}
+```
+
+### Control de desbordamiento en la acumulación
+
+Una pregunta natural: al sumar $\ell$ productos pointwise (cada uno con $|r_j| \leq Q$ tras `montgomery_reduce`), ¿no puede desbordarse el `int32_t`?
+
+Hagamos la cuenta para el peor caso (ML-DSA-87, $\ell = 7$):
+
+```
+Valor máximo por sumando:   |r_j| ≤ Q = 8 380 417
+Número de sumandos:         ℓ = 7
+Valor máximo del acumulador: 7 × 8 380 417 = 58 662 919
+Bits necesarios:            ceil(log₂(58 662 919)) = 26 bits
+Capacidad de int32_t:       31 bits de magnitud
+Margen:                     31 - 26 = 5 bits
+```
+
+Sobran 5 bits de margen. No hay riesgo de desbordamiento. Esto significa que podemos sumar los $\ell$ productos **sin reducción intermedia**, y aplicar una sola `barrett_reduce` al final de toda la acumulación:
+
+```c
+void poly_reduce(poly *a) {
+    unsigned int i;
+    for (i = 0; i < N; ++i)
+        a->coeffs[i] = barrett_reduce(a->coeffs[i]);
+}
+```
+
+Este diseño ahorra $\ell - 1$ pasadas de reducción por coeficiente, lo que se traduce en miles de operaciones de menos por cada producto interno.
+
+---
+
+## 24. ¿Por qué comprimir? El problema del tamaño de la firma
+
+Hasta ahora, todos nuestros coeficientes viven en $\mathbb{Z}_Q$ y cada uno ocupa un `int32_t` completo (32 bits, aunque realmente solo usamos 23). Si serializamos la clave pública o la firma sin comprimir, el resultado es desproporcionado.
+
+**Ejemplo para ML-DSA-44:**
+
+La clave pública incluye el vector $\mathbf{t}$ de $k = 4$ polinomios. Sin comprimir:
+
+```
+4 polinomios × 256 coeficientes × 23 bits = 23 552 bits ≈ 2 944 bytes
+```
+
+Pero un coeficiente de 23 bits contiene más precisión de la que el verificador necesita. Si dividimos cada coeficiente en una parte "alta" (los bits más significativos) y una parte "baja" (los menos significativos), podemos descartar la parte baja de la clave pública y transmitir solo la parte alta. La parte baja se almacena en la clave privada y se usa internamente durante la firma.
+
+ML-DSA emplea **dos mecanismos de división** distintos, cada uno adaptado a un contexto diferente:
+
+| Mecanismo      | Divisor           | Quién lo usa | Para qué                                  |
+|----------------|-------------------|--------------|-----------------------------------------|
+| `Power2Round`  | $2^d = 2^{13}$   | `KeyGen`     | Dividir $\mathbf{t}$ en $\mathbf{t}_1$ (pública) y $\mathbf{t}_0$ (privada) |
+| `Decompose`    | $2\gamma_2$       | `Sign`/`Verify` | Extraer bits altos del compromiso $\mathbf{w}$ |
+
+El primero usa una potencia de 2 como divisor (barato: shifts de bits). El segundo usa un divisor más complejo ($2\gamma_2$, que no es potencia de 2) adaptado a la geometría del esquema de rechazo.
+
+---
+
+## 25. Power2Round: el bisturí de los 13 bits
+
+La función `Power2Round` aparece en un solo lugar del algoritmo: durante la generación de claves (`KeyGen`). Su trabajo es dividir cada coeficiente del vector $\mathbf{t} = \mathbf{A} \cdot \mathbf{s}_1 + \mathbf{s}_2$ en una parte alta $r_1$ y una parte baja $r_0$, separadas por un corte en el bit 13.
+
+### La operación paso a paso
+
+**Definición (FIPS 204, Algoritmo 35):**
+
+Dado $r \in \mathbb{Z}_Q$ y $d = 13$:
+
+1. **Canonizar:** $r^+ \leftarrow r \bmod Q$ (llevar al rango $[0, Q)$)
+2. **Extraer parte baja centrada:** $r_0 \leftarrow r^+ \bmod^{\pm} 2^d$  
+   Es decir, el residuo de dividir $r^+$ entre $2^{13} = 8\,192$, pero centrado en el intervalo $(-2^{12}, 2^{12}]$ en vez del habitual $[0, 2^{13})$.
+3. **Calcular parte alta:** $r_1 \leftarrow (r^+ - r_0) / 2^d$
+
+La clave es que $r^+ = r_1 \cdot 2^{13} + r_0$, lo que permite reconstruir $r^+$ exactamente a partir de $r_1$ y $r_0$.
+
+En código:
+
+```c
+void power2round(int32_t *r1, int32_t *r0, int32_t a) {
+    int32_t a_pos = caddq(a);    /* Canonizar a [0, Q) */
+
+    /* r0 = a⁺ mod±(2^D)  usando el truco de redondeo */
+    *r0 = a_pos - ((a_pos + (1 << (D - 1))) >> D) * (1 << D);
+
+    *r1 = (a_pos - *r0) >> D;
+}
+```
+
+Observa que toda la operación se reduce a sumas, un desplazamiento a la derecha y una multiplicación por $2^{13}$ (que es otro shift). No hay divisiones. El parámetro $d = 13$ es una potencia de 2, así que todo el mecanismo es extremadamente barato en hardware.
+
+### Mapa de bits de un coeficiente
+
+```
+Coeficiente r⁺ ∈ [0, Q)    (Q = 8 380 417, cabe en 23 bits)
+
+  Bit:  22  21  20  19  18  17  16  15  14  13  12  11  10  ...  1   0
+       ├───────────────────────────────┼───────────────────────────────┤
+       │          r₁ (10 bits)         │         r₀ (13 bits)         │
+       │       parte ALTA              │       parte BAJA             │
+       │    rango: [0, 1 023]          │  rango: (-4 096, 4 096]      │
+       │                               │                               │
+       │    → Clave pública (t₁)       │    → Clave privada (t₀)      │
+       │    10 bits por coef.          │    13 bits por coef.         │
+       └───────────────────────────────┴───────────────────────────────┘
+```
+
+**¿Cuánto ahorramos?** La clave pública $\mathbf{t}_1$ ocupa 10 bits por coeficiente en vez de 23. Para ML-DSA-44:
+
+```
+Sin comprimir:  23 bits × 256 × 4 = 23 552 bits = 2 944 bytes
+Con Power2Round: 10 bits × 256 × 4 = 10 240 bits = 1 280 bytes
+Ahorro: 56%
+```
+
+**¿Por qué $r_1$ cabe en 10 bits?** El valor máximo de $r_1$ se alcanza cuando $r^+$ está cerca de $Q - 1$ y $r_0$ es negativo:
+
+$$r_1^{\max} = \frac{Q - 1 + 2^{12}}{2^{13}} = \frac{8\,380\,416 + 4\,096}{8\,192} = \frac{8\,384\,512}{8\,192} = 1\,023$$
+
+Y $2^{10} = 1\,024 > 1\,023$, así que 10 bits son exactamente suficientes.
+
+> **Demostración formal:** [`MATH_PROOFS.md`, Demostración 13](MATH_PROOFS.md#demostración-13-corrección-y-cotas-de-power2round) *(pendiente)*
+
+---
+
+## 26. Decompose, HighBits y LowBits: dividir por α
+
+Mientras que `Power2Round` divide un coeficiente por $2^{13}$ (potencia de 2, barato), `Decompose` divide por $\alpha = 2\gamma_2$, un divisor que **no** es potencia de 2. Esto rompe la cadena de optimización trivial y requiere una operación de módulo real (`%`).
+
+### Por qué α no es potencia de 2
+
+El divisor $\alpha = 2\gamma_2$ depende del nivel de seguridad:
+
+```
+ML-DSA-44:   α = 2 × 95 232  = 190 464
+ML-DSA-65/87: α = 2 × 261 888 = 523 776
+```
+
+Ninguno de estos valores es potencia de 2, así que no podemos usar shifts para dividir. La razón de esta elección es algebraica: estos valores son divisores exactos de $Q - 1$, lo que garantiza que al dividir el rango $[0, Q)$ en franjas de ancho $\alpha$, las franjas cubren todo el espacio sin solapamientos ni huecos (excepto un caso especial, que veremos ahora).
+
+**Definición (FIPS 204, Algoritmo 36):** Dado $r \in \mathbb{Z}_Q$ y $\alpha = 2\gamma_2$:
+
+1. $r^+ \leftarrow r \bmod Q$
+2. $r_0 \leftarrow r^+ \bmod^{\pm} \alpha$ (residuo centrado en $(-\gamma_2, \gamma_2]$)
+3. Si $r^+ - r_0 = Q - 1$: fijar $r_1 = 0$, $r_0 = r_0 - 1$
+4. Si no: $r_1 = (r^+ - r_0) / \alpha$
+
+El resultado cumple: $r^+ \equiv r_1 \cdot \alpha + r_0 \pmod{Q}$ (con la corrección del paso 3).
+
+### El corner case de Q − 1
+
+El paso 3 merece una explicación detenida. Veamos qué ocurre con $r^+ = Q - 1 = 8\,380\,416$.
+
+Para ML-DSA-44 ($\alpha = 190\,464$):
+
+```
+r⁺ = 8 380 416
+Número de franjas completas: 8 380 416 / 190 464 = 44
+44 × 190 464 = 8 380 416 = Q - 1
+Residuo: r₀ = 8 380 416 - 8 380 416 = 0
+r⁺ - r₀ = 8 380 416 = Q - 1    ← ¡Se activa el corner case!
+```
+
+¿Por qué es un problema? Porque $r_1 = 44$ sería un valor fuera del rango esperado $[0, 43]$ (hay exactamente $m = (Q-1)/\alpha = 44$ regiones, numeradas de 0 a 43). La frontera $r^+ = Q - 1$ es el punto donde el eje  modular "da la vuelta": el valor $Q - 1$ es adyacente a $0$ en $\mathbb{Z}_Q$, y su parte alta debería coincidir con la de $0$, que es $r_1 = 0$.
+
+El paso 3 fuerza exactamente eso: $r_1 = 0$ y $r_0 = r_0 - 1$ (el residuo absorbe la corrección). Esto garantiza que `HighBits` devuelve valores envolventes correctos en la frontera modular, lo cual es esencial para que `UseHint` funcione.
+
+En código:
+
+```c
+void decompose(int32_t *r1, int32_t *r0, int32_t a) {
+    int32_t a_pos = caddq(a);
+
+    *r0 = a_pos % (2 * GAMMA2);               /* residuo positivo [0, α) */
+    if (*r0 > GAMMA2)
+        *r0 -= 2 * GAMMA2;                    /* centrar en (-γ₂, γ₂] */
+
+    if (a_pos - *r0 == Q - 1) {               /* corner case */
+        *r1 = 0;
+        *r0 = *r0 - 1;
+    } else {
+        *r1 = (a_pos - *r0) / (2 * GAMMA2);
+    }
+}
+```
+
+`HighBits` y `LowBits` son simplemente envoltorios que devuelven una u otra parte:
+
+```c
+int32_t highbits(int32_t a) {
+    int32_t r1, r0;
+    decompose(&r1, &r0, a);
+    return r1;
+}
+
+int32_t lowbits(int32_t a) {
+    int32_t r1, r0;
+    decompose(&r1, &r0, a);
+    return r0;
+}
+```
+
+### ¿Y el tiempo constante?
+
+Aquí hay una diferencia importante respecto a las funciones de la Fase 1. `decompose` contiene ramas (`if`) y una operación de módulo (`%`) que se traduce en una instrucción de división. En la Fase 1, esto habría sido inaceptable por los canales laterales. Pero en la Fase 3, **es seguro**, por la siguiente razón:
+
+Los argumentos de `decompose` no son valores secretos. La función se aplica sobre:
+- El compromiso $\mathbf{w} = \mathbf{A} \cdot \mathbf{y}$, que el firmante envía públicamente.
+- Reconstrucciones a partir de la clave pública y la firma durante la verificación.
+
+En ninguno de estos casos, el valor de entrada depende de la clave privada. Las ramas y la instrucción `%` no filtran información secreta. Podemos usar código legible y directo sin sacrificar la seguridad.
+
+---
+
+## 27. El mecanismo de Hints: cómo corregir el acarreo
+
+### El problema de la frontera
+
+Este es quizás el concepto más sutil de todo ML-DSA. Para entenderlo, necesitamos ver el panorama completo del esquema de firma:
+
+1. **El firmante** genera un enmascaramiento aleatorio $\mathbf{y}$, calcula $\mathbf{w} = \mathbf{A} \cdot \mathbf{y}$, y extrae los bits altos $\mathbf{w}_1 = \text{HighBits}(\mathbf{w})$.
+2. **El firmante** genera un desafío $c$ a partir de $\mathbf{w}_1$, y produce la firma $\mathbf{z} = \mathbf{y} + c \cdot \mathbf{s}_1$.
+3. **El verificador** recibe $(\mathbf{z}, \mathbf{h})$ y reconstruye $\mathbf{w}' = \mathbf{A} \cdot \mathbf{z} - c \cdot \mathbf{t}$. Necesita recuperar $\mathbf{w}_1$ a partir de $\mathbf{w}'$.
+
+El problema es que $\mathbf{w}' \neq \mathbf{w}$. Difieren por una cantidad pequeña (controlada por los parámetros de rechazo), pero esa diferencia puede cruzar la frontera entre dos regiones de `HighBits`.
+
+Visualicemos esto con un ejemplo numérico para ML-DSA-44 ($\gamma_2 = 95\,232$, $\alpha = 190\,464$):
+
+```
+Eje numérico de Z_Q dividido en franjas de ancho α = 190 464:
+
+  0        190 464    380 928    571 392    761 856    ...
+  ├──────────┼──────────┼──────────┼──────────┼────────
+    r₁ = 0    r₁ = 1    r₁ = 2    r₁ = 3    r₁ = 4
+
+CASO NORMAL:
+  w   = 200 000   →  HighBits(w)  = 1   (centrado en la franja r₁=1)
+  w'  = 200 100   →  HighBits(w') = 1   (sigue en la misma franja)
+  → Sin carry. El verificador obtiene w₁ = 1 directamente.
+
+CASO FRONTERA:
+  w   = 285 695   →  HighBits(w)  = 1   (cerca del borde derecho de r₁=1)
+  w'  = 285 697   →  HighBits(w') = 2   (¡cruzó a la franja r₁=2!)
+  → ¡Carry! El verificador obtiene w₁' = 2, pero el firmante usó w₁ = 1.
+  → Sin corrección, la verificación falla.
+```
+
+La diferencia $|w - w'| = 2$ es minúscula, pero basta para cruzar una frontera y cambiar completamente los bits altos. El hash del compromiso se calcula sobre $\mathbf{w}_1$, así que si el verificador usa un valor distinto de $\mathbf{w}_1$, el hash no coincidirá y la firma se rechazará como inválida, aunque sea perfectamente legítima.
+
+### MakeHint: el firmante detecta el carry
+
+La solución es que el firmante, que conoce tanto $\mathbf{w}$ como la perturbación, incluya en la firma una **pista** (hint) que le diga al verificador: "en esta posición, los bits altos cambiaron; ajusta tu cálculo".
+
+Para cada coeficiente, la pista es un único bit:
+
+```
+MakeHint(z, r):                         (FIPS 204, Algoritmo 39)
+  1. r₁ ← HighBits(r)                  // Bits altos del valor original
+  2. v₁ ← HighBits(r + z)              // Bits altos del valor perturbado
+  3. Si r₁ ≠ v₁: devolver 1 (carry)    // Hubo cruce de frontera
+  4. Si no:       devolver 0 (ok)       // Sin cruce
+```
+
+El vector completo $\mathbf{h}$ tiene $k \times 256$ bits (uno por cada coeficiente de cada polinomio del vector). FIPS 204 impone una cota estricta: el número total de bits a 1 en $\mathbf{h}$ no puede exceder $\omega$ (80, 55, o 75 según el nivel). Esto limita el tamaño de la firma. Si una firma particular requiere más de $\omega$ hints, se descarta y se reintenta con un nuevo enmascaramiento $\mathbf{y}$ (esto es el "abort" del esquema *Fiat-Shamir with Aborts*).
+
+```
+Estructura del vector hint h (ML-DSA-44, k = 4):
+
+  h.vec[0].coeffs: [0 0 0 1 0 0 0 0 ... 0 0 1 0 0 0]   ← 256 bits
+  h.vec[1].coeffs: [0 0 0 0 0 0 0 0 ... 0 0 0 0 0 0]
+  h.vec[2].coeffs: [0 0 1 0 0 0 0 0 ... 0 0 0 0 0 0]
+  h.vec[3].coeffs: [0 0 0 0 0 1 0 0 ... 0 0 0 0 0 0]
+                    ──────────────────────────────────
+                    Total de 1s ≤ ω = 80
+```
+
+En código:
+
+```c
+int32_t make_hint(int32_t z, int32_t r) {
+    int32_t r1 = highbits(r);
+    int32_t v1 = highbits(r + z);
+    return (r1 != v1);    /* 1 si hubo carry, 0 si no */
+}
+```
+
+### UseHint: el verificador corrige
+
+El verificador recibe el hint $h$ y el valor $r$ que él ha recalculado. Si $h = 0$, simplemente usa `HighBits(r)`. Si $h = 1$, sabe que hubo un carry y debe ajustar el resultado en $\pm 1$.
+
+Pero ¿en qué dirección ajustar? El signo del residuo $r_0$ lo indica:
+
+- Si $r_0 > 0$: el valor $r$ estaba en la mitad superior de su franja, cerca del borde derecho. El carry fue hacia arriba: $r_1 \to r_1 + 1$.
+- Si $r_0 \leq 0$: el valor $r$ estaba en la mitad inferior, cerca del borde izquierdo. El carry fue hacia abajo: $r_1 \to r_1 - 1$.
+
+```
+        Franja r₁ = 3
+        ├────────────────────────────────┤
+        │         r₀ < 0    │  r₀ > 0   │
+        │   (cerca del      │  (cerca   │
+        │   borde izq.)     │  del borde│
+        │                   │  derecho) │
+        │   carry → abajo   │  carry →  │
+        │   r₁ - 1 = 2      │  arriba   │
+        │                   │  r₁+1 = 4 │
+        ├───────────────────┼───────────┤
+                          centro
+```
+
+La aritmética es modular: si $r_1 = m - 1$ (última franja) y el carry va hacia arriba, el resultado envuelve a 0. Si $r_1 = 0$ y va hacia abajo, envuelve a $m - 1$. Donde $m = (Q-1) / (2\gamma_2)$ es el número total de franjas.
+
+**Definición (FIPS 204, Algoritmo 40):**
+
+```
+UseHint(h, r):
+  1. (r₁, r₀) ← Decompose(r)
+  2. Si h = 0: devolver r₁
+  3. Si r₀ > 0: devolver (r₁ + 1) mod m
+  4. Si no:     devolver (r₁ - 1) mod m
+```
+
+En código:
+
+```c
+#define M ((Q - 1) / (2 * GAMMA2))
+
+int32_t use_hint(int32_t h, int32_t r) {
+    int32_t r1, r0;
+    decompose(&r1, &r0, r);
+
+    if (h == 0)
+        return r1;
+
+    if (r0 > 0)
+        return (r1 + 1) % M;
+    else
+        return (r1 - 1 + M) % M;   /* + M evita negativos */
+}
+```
+
+> **Nota:** Al igual que `decompose`, las funciones `MakeHint` y `UseHint` operan sobre datos públicos. Las ramas condicionales no filtran información sobre la clave privada.
+
+---
+
+## 28. El flujo completo de Sign y Verify con compresión
+
+Ahora podemos ver cómo todas las piezas de la Fase 3 encajan en el algoritmo completo de ML-DSA:
+
+```
+╔═════════════════════════════════════════════════════════════════╗
+║                        KeyGen                                  ║
+╠═════════════════════════════════════════════════════════════════╣
+║  1. Generar s₁, s₂ (coefs en [-η, η])                        ║
+║  2. Generar A (matriz k×ℓ de polinomios)                      ║
+║  3. t = A·s₁ + s₂               ← polyvecl_pointwise_acc     ║
+║  4. (t₁, t₀) = Power2Round(t)   ← poly_power2round           ║
+║  5. Clave pública:  pk = (ρ, t₁)    ← t₁ ocupa 10 bits/coef  ║
+║  6. Clave privada:  sk = (ρ, K, tr, s₁, s₂, t₀)              ║
+╚═════════════════════════════════════════════════════════════════╝
+
+╔═════════════════════════════════════════════════════════════════╗
+║                         Sign                                   ║
+╠═════════════════════════════════════════════════════════════════╣
+║  Bucle (Fiat-Shamir with Aborts):                              ║
+║  1. Muestrear y (coefs en [-γ₁, γ₁])                         ║
+║  2. w = A·y                      ← polyvecl_pointwise_acc     ║
+║  3. w₁ = HighBits(w)             ← poly_highbits              ║
+║  4. c = H(w₁, μ)                                              ║
+║  5. z = y + c·s₁                                              ║
+║  6. r₀ = LowBits(w - c·s₂)      ← poly_lowbits               ║
+║  7. Si ‖z‖∞ ≥ γ₁ - β  o  ‖r₀‖∞ ≥ γ₂ - β:  ABORT            ║
+║  8. h = MakeHint(-c·t₀, w-c·s₂+c·t₀)  ← poly_make_hint      ║
+║  9. Si peso(h) > ω:             ABORT                         ║
+║  10. Firma: σ = (c̃, z, h)                                     ║
+╚═════════════════════════════════════════════════════════════════╝
+
+╔═════════════════════════════════════════════════════════════════╗
+║                        Verify                                  ║
+╠═════════════════════════════════════════════════════════════════╣
+║  1. w' = A·z - c·t₁·2^d                                      ║
+║  2. w₁' = UseHint(h, w')        ← poly_use_hint               ║
+║  3. c' = H(w₁', μ)                                            ║
+║  4. Aceptar si c'== c̃  y  ‖z‖∞ < γ₁ - β  y  peso(h) ≤ ω    ║
+╚═════════════════════════════════════════════════════════════════╝
+```
+
+La secuencia es clara:
+- `Power2Round` aparece **una vez** en `KeyGen`, para comprimir la clave pública.
+- `HighBits` y `LowBits` aparecen en `Sign` para evaluar el compromiso.
+- `MakeHint` aparece en `Sign` para generar las pistas.
+- `UseHint` aparece en `Verify` para reconstruir $\mathbf{w}_1$ sin acceso a $\mathbf{w}$.
+
+---
+
+## 29. Mapa de Constantes — Fase 3
+
+| Constante | Valor (ML-DSA-44) | Valor (ML-DSA-87) | Por qué existe |
+|-----------|-------------------|-------------------|----------------|
+| `N`       | 256               | 256               | Grado de los polinomios |
+| `K`       | 4                 | 8                 | Filas de A, dimensión de t, w, h |
+| `L`       | 4                 | 7                 | Columnas de A, dimensión de s₁, y, z |
+| `D`       | 13                | 13                | Bits descartados por `Power2Round` |
+| `GAMMA2`  | 95 232            | 261 888           | Divisor de `Decompose`: $(Q-1)/88$ o $(Q-1)/32$ |
+| `M`       | 44                | 16                | Número de franjas de `HighBits`: $(Q-1)/(2\gamma_2)$ |
+| `ETA`     | 2                 | 2                 | Cota de coeficientes de claves secretas |
+| `TAU`     | 39                | 60                | Peso del desafío $c$ |
+| `BETA`    | 78                | 120               | Cota de rechazo: $\tau \cdot \eta$ |
+| `GAMMA1`  | $2^{17}$          | $2^{19}$          | Rango de muestreo de y |
+| `OMEGA`   | 80                | 75                | Máximo de hints activos en la firma |
+
+### Relaciones entre constantes de Fase 3
+
+```
+α = 2·γ₂                        ← Divisor de Decompose
+M = (Q - 1) / α                 ← Número de franjas HighBits
+M × α = Q - 1                   ← Las franjas cubren [0, Q-1] exactamente
+r = r₁·α + r₀                   ← Reconstrucción de Decompose
+r = r₁·2^D + r₀                 ← Reconstrucción de Power2Round
+β = τ·η                         ← Cota de rechazo
+peso(h) ≤ ω                     ← Restricción de la firma
+```
+
+---
+
+*Guía de estudio personal — Fases 1, 2 y 3 | `el_pedestal` | ML-DSA bare-metal en C99 de 32 bits*
