@@ -1724,7 +1724,7 @@ void power2round(int32_t *r1, int32_t *r0, int32_t a) {
 }
 ```
 
-Observa que toda la operación se reduce a sumas, un desplazamiento a la derecha y una multiplicación por $2^{13}$ (que es otro shift). No hay divisiones. El parámetro $d = 13$ es una potencia de 2, así que todo el mecanismo es extremadamente barato en hardware.
+Observa que toda la operación se reduce a sumas, un desplazamiento a la derecha y una multiplicación por $2^{13}$ (que es otro shift). No hay divisiones. El divisor $2^d = 2^{13} = 8\,192$ es una potencia de 2, así que todo el mecanismo se resuelve con shifts y sumas, sin instrucciones de división.
 
 ### Mapa de bits de un coeficiente
 
@@ -1756,7 +1756,7 @@ $$r_1^{\max} = \frac{Q - 1 + 2^{12}}{2^{13}} = \frac{8\,380\,416 + 4\,096}{8\,19
 
 Y $2^{10} = 1\,024 > 1\,023$, así que 10 bits son exactamente suficientes.
 
-> **Demostración formal:** [`MATH_PROOFS.md`, Demostración 13](MATH_PROOFS.md#demostración-13-corrección-y-cotas-de-power2round) *(pendiente)*
+> **Demostración formal:** [`MATH_PROOFS.md`, Demostración 13](MATH_PROOFS.md#demostración-13-corrección-y-cotas-de-power2round)
 
 ---
 
