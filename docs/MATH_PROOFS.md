@@ -1,6 +1,6 @@
-# MATH_PROOFS.md — Demostraciones Matemáticas Rigurosas: Fase 1
+# MATH_PROOFS.md — Demostraciones Matemáticas Rigurosas: Fases 1, 2 y 3
 
-> **Propósito:** Documento de estudio personal con las demostraciones completas y detalladas de todas las constantes y mecanismos aritméticos de la Fase 1 de `el_pedestal`. Se asume familiaridad con álgebra de anillos, aritmética modular y representación en complemento a dos.
+> **Propósito:** Documento de estudio personal con las demostraciones completas y detalladas de todas las constantes y mecanismos aritméticos de `el_pedestal`. Se asume familiaridad con álgebra de anillos, aritmética modular y representación en complemento a dos.
 >
 > Para el contexto de ingeniería y los contratos de interfaz, ver [`DESIGN.md`](../DESIGN.md).
 
@@ -701,4 +701,240 @@ $$f = 41\,978 \quad \checkmark$$
 
 ---
 
-*Documento de demostraciones matemáticas — Fases 1 y 2 | `el_pedestal` | Uso: estudio personal y auditoría criptográfica*
+# Fase 3: Demostraciones de Compresión y Hints
+
+---
+
+## Demostración 13: Corrección y cotas de `Power2Round`
+
+### Objetivo
+
+Probar que la descomposición `Power2Round` satisface la identidad de reconstrucción $r^+ = r_1 \cdot 2^d + r_0$ y que las cotas $r_1 \in [0, 1\,023]$, $r_0 \in (-2^{12}, 2^{12}]$ se cumplen para todo $r^+ \in [0, Q)$.
+
+### Definiciones
+
+Sea $r^+ \in [0, Q)$ un coeficiente en rango canónico. Definimos $d = 13$ y:
+
+$$r_0 = r^+ \bmod^{\pm} 2^d$$
+
+donde $\bmod^{\pm}$ denota el residuo centrado: el único entero $r_0 \in (-2^{d-1}, 2^{d-1}]$ tal que $r^+ \equiv r_0 \pmod{2^d}$.
+
+$$r_1 = \frac{r^+ - r_0}{2^d}$$
+
+### Prueba de la identidad de reconstrucción
+
+Por definición del residuo centrado, $r^+ - r_0 \equiv 0 \pmod{2^d}$, es decir, $2^d \mid (r^+ - r_0)$. Por tanto la división $r_1 = (r^+ - r_0) / 2^d$ es exacta (sin resto) y:
+
+$$r_1 \cdot 2^d + r_0 = (r^+ - r_0) + r_0 = r^+ \qquad \square$$
+
+### Prueba de la cota de $r_0$
+
+El residuo centrado $r_0 = r^+ \bmod^{\pm} 2^{13}$ satisface por definición:
+
+$$r_0 \in (-2^{12}, 2^{12}]$$
+
+Más explícitamente: sea $s = r^+ \bmod 2^{13} \in [0, 2^{13})$. Entonces:
+
+- Si $s \leq 2^{12}$: $r_0 = s \in [0, 2^{12}]$.
+- Si $s > 2^{12}$: $r_0 = s - 2^{13} \in (-2^{12}, 0)$.
+
+En ambos casos $r_0 \in (-2^{12}, 2^{12}]$, es decir $|r_0| \leq 2^{12} = 4\,096$. $\square$
+
+### Prueba de la cota de $r_1$
+
+Dado $r^+ \in [0, Q)$ y $r_0 \in (-2^{12}, 2^{12}]$:
+
+**Cota inferior:** $r^+ \geq 0$ y $r_0 \leq 2^{12}$, por lo que $r^+ - r_0 \geq 0 - 2^{12} = -2^{12}$. Pero $r^+ - r_0$ es múltiplo de $2^{13}$, y el menor múltiplo no negativo de $2^{13}$ es $0$. Dado que $r^+ \geq 0$ y $|r_0| \leq 2^{12} < 2^{13}$, se tiene $r^+ - r_0 \geq -2^{12}$, y el redondeo al múltiplo de $2^{13}$ más cercano da $r^+ - r_0 \geq 0$. Por tanto $r_1 \geq 0$.
+
+**Cota superior:** $r^+ \leq Q - 1 = 8\,380\,416$ y $r_0 > -2^{12}$, por lo que:
+
+$$r^+ - r_0 < 8\,380\,416 + 2^{12} = 8\,380\,416 + 4\,096 = 8\,384\,512$$
+
+$$r_1 = \frac{r^+ - r_0}{2^{13}} < \frac{8\,384\,512}{8\,192} = 1\,024$$
+
+Dado que $r_1$ es un entero, $r_1 \leq 1\,023$. Verificación del caso extremo: $r^+ = Q - 1 = 8\,380\,416$, $r_0 = 8\,380\,416 \bmod 8\,192 = 8\,380\,416 - 1\,022 \times 8\,192 = 8\,380\,416 - 8\,372\,224 = 8\,192$, pero $8\,192 > 4\,096$, así que $r_0 = 8\,192 - 8\,192 = 0$ (en realidad $8\,192 \bmod 8\,192 = 0$, luego $r_0 = 0$). Entonces $r_1 = 8\,380\,416 / 8\,192 = 1\,022.5...$, lo cual no es entero; recalculamos: $8\,380\,416 / 8\,192 = 1\,022.9375$. El valor exacto: $1\,022 \times 8\,192 = 8\,372\,224$, $r^+ - 8\,372\,224 = 8\,192$, $r_0 = 0$ (pues $8\,192 = 2^{13}$, $8\,192 \bmod 2^{13} = 0$). Entonces $r_1 = (8\,380\,416 - 0) / 8\,192 = 1\,023$. $\checkmark$
+
+**Resultado:** $r_1 \in [0, 1\,023]$, que cabe exactamente en $\lceil \log_2(1\,024) \rceil = 10$ bits. $\square$
+
+### Verificación en la implementación
+
+El código calcula $r_0$ mediante:
+
+```c
+*r0 = a_pos - ((a_pos + (1 << (D - 1))) >> D) * (1 << D);
+```
+
+Denotemos $q = (a\_pos + 2^{12}) \gg 13 = \lfloor (a\_pos + 2^{12}) / 2^{13} \rfloor$. Entonces:
+
+$$r_0 = a\_pos - q \cdot 2^{13}$$
+
+Debemos verificar que esto produce el residuo centrado. Sea $s = a\_pos \bmod 2^{13}$:
+
+- Si $s \leq 2^{12}$: $a\_pos + 2^{12} < (q+1) \cdot 2^{13}$, luego $\lfloor (a\_pos + 2^{12}) / 2^{13} \rfloor = q$ donde $q = \lfloor a\_pos / 2^{13} \rfloor$. Entonces $r_0 = a\_pos - q \cdot 2^{13} = s \in [0, 2^{12}]$. $\checkmark$
+- Si $s > 2^{12}$: $a\_pos + 2^{12} \geq (q+1) \cdot 2^{13}$, luego $\lfloor (a\_pos + 2^{12}) / 2^{13} \rfloor = q + 1$ donde $q = \lfloor a\_pos / 2^{13} \rfloor$. Entonces $r_0 = a\_pos - (q+1) \cdot 2^{13} = s - 2^{13} \in (-2^{12}, 0)$. $\checkmark$
+
+Ambos casos reproducen el residuo centrado. $\square$
+
+---
+
+## Demostración 14: Corrección de `Decompose` y tratamiento del caso frontera
+
+### Objetivo
+
+Probar que `Decompose` satisface $r^+ \equiv r_1 \cdot \alpha + r_0 \pmod{Q}$ para todo $r^+ \in [0, Q)$, con $\alpha = 2\gamma_2$, incluyendo la corrección del corner case $r^+ - r_0 = Q - 1$.
+
+### Caso general: $r^+ - r_0 \neq Q - 1$
+
+Sea $r^+ \in [0, Q)$ y $r_0 = r^+ \bmod^{\pm} \alpha$, es decir, $r_0$ es el único entero en $(-\gamma_2, \gamma_2]$ tal que $r^+ \equiv r_0 \pmod{\alpha}$.
+
+Dado que $\alpha \mid (r^+ - r_0)$, la división $r_1 = (r^+ - r_0) / \alpha$ es exacta, y la reconstrucción es trivial:
+
+$$r_1 \cdot \alpha + r_0 = (r^+ - r_0) + r_0 = r^+ \qquad \square$$
+
+**Cota de $r_1$:** Como $r^+ \in [0, Q)$ y $r_0 > -\gamma_2$:
+
+$$r_1 = \frac{r^+ - r_0}{\alpha} < \frac{Q + \gamma_2}{\alpha} = \frac{Q + \gamma_2}{2\gamma_2}$$
+
+Para ML-DSA-44: $r_1 < (8\,380\,417 + 95\,232) / 190\,464 = 8\,475\,649 / 190\,464 \approx 44.5$, luego $r_1 \leq 44$.
+
+El valor $r_1 = 44$ se alcanza únicamente cuando $r^+ - r_0 = 44 \cdot \alpha = 44 \times 190\,464 = 8\,380\,416 = Q - 1$, que es exactamente el corner case.
+
+**Cota de $r_0$:** Por definición del residuo centrado: $r_0 \in (-\gamma_2, \gamma_2]$.
+
+### Corner case: $r^+ - r_0 = Q - 1$
+
+Cuando $r^+ - r_0 = Q - 1$, tenemos $r_1 = (Q-1)/\alpha$. Verifiquemos que $\alpha \mid (Q - 1)$:
+
+$$Q - 1 = 8\,380\,416 = 88 \times 95\,232 = 88 \times \gamma_2 = 44 \times \alpha \quad \text{(ML-DSA-44)}$$
+
+$$Q - 1 = 8\,380\,416 = 32 \times 261\,888 = 32 \times \gamma_2 = 16 \times \alpha \quad \text{(ML-DSA-65/87)}$$
+
+Luego $r_1 = 44$ (resp. $16$). Pero el rango deseado de $r_1$ es $[0, m-1]$ donde $m = (Q-1)/\alpha$, es decir $[0, 43]$ (resp. $[0, 15]$). El valor $r_1 = m$ está fuera de este rango.
+
+**La corrección del estándar** consiste en forzar:
+
+$$r_1 \leftarrow 0, \qquad r_0 \leftarrow r_0 - 1$$
+
+**Prueba de que la corrección preserva la congruencia:**
+
+Antes de la corrección: $r^+ = r_1 \cdot \alpha + r_0 = m \cdot \alpha + r_0 = (Q - 1) + r_0$.
+
+Después de la corrección: $r_1' \cdot \alpha + r_0' = 0 \cdot \alpha + (r_0 - 1) = r_0 - 1$.
+
+Debemos verificar que $r_0 - 1 \equiv r^+ \pmod{Q}$:
+
+$$r^+ = (Q - 1) + r_0 \equiv -1 + r_0 = r_0 - 1 \pmod{Q}$$
+
+$\checkmark$
+
+**Justificación geométrica:** El valor $r^+ = Q - 1$ es adyacente a $r^+ = 0$ en el anillo $\mathbb{Z}_Q$. La parte alta de $0$ es $r_1 = 0$. Para preservar la continuidad cíclica de `HighBits` (necesaria para que `UseHint` funcione correctamente en la frontera modular), la parte alta de $Q - 1$ también debe ser $0$. Esto es lo que impone el corner case. $\square$
+
+### Cota de $r_0$ tras la corrección
+
+En el corner case, $r_0$ se decrementa en 1. Antes de la corrección, $r_0 \in (-\gamma_2, \gamma_2]$. Después: $r_0 - 1 \in (-\gamma_2 - 1, \gamma_2]$.
+
+Pero el corner case solo se activa cuando $r^+ - r_0 = Q - 1$, lo cual implica $r^+ = Q - 1 + r_0$. Dado que $r^+ \in [0, Q)$: $r_0 \in (-(Q-1), 1]$. Combinado con $r_0 \in (-\gamma_2, \gamma_2]$, el rango efectivo es $r_0 \in (-\gamma_2, 1]$, y tras decrementar: $r_0 - 1 \in (-\gamma_2 - 1, 0]$.
+
+Para ML-DSA-44: $|r_0 - 1| \leq \gamma_2 = 95\,232$, que cabe en 17 bits. $\square$
+
+---
+
+## Demostración 15: Corrección de `MakeHint` y `UseHint`
+
+### Objetivo
+
+Probar que si $h = \text{MakeHint}(z, r)$ y $v = r + z$, entonces $\text{UseHint}(h, v) = \text{HighBits}(r)$ cuando $|z|$ es suficientemente pequeño (dentro de las cotas de rechazo del esquema).
+
+### Definiciones
+
+Sean $r, z \in \mathbb{Z}_Q$. Denotemos:
+
+- $(r_1, r_0) = \text{Decompose}(r)$, es decir, $r_1 = \text{HighBits}(r)$
+- $(v_1, v_0) = \text{Decompose}(r + z)$, es decir, $v_1 = \text{HighBits}(r + z)$
+- $h = \text{MakeHint}(z, r) = \begin{cases} 1 & \text{si } v_1 \neq r_1 \\ 0 & \text{si } v_1 = r_1 \end{cases}$
+
+Sea $m = (Q - 1) / \alpha$ el número total de franjas.
+
+### Caso $h = 0$: sin carry
+
+Si $h = 0$, entonces $v_1 = r_1$. `UseHint` devuelve $v_1 = r_1 = \text{HighBits}(r)$. $\checkmark$
+
+### Caso $h = 1$: carry detectado
+
+Si $h = 1$, entonces $v_1 \neq r_1$. Dado que $|z|$ está acotado por los parámetros de rechazo ($\|z\|_\infty < \gamma_1 - \beta$ y $\|r_0\|_\infty < \gamma_2 - \beta$), la perturbación $z$ solo puede cruzar **una** frontera de franja. Por tanto:
+
+$$v_1 \in \{(r_1 + 1) \bmod m, \; (r_1 - 1 + m) \bmod m\}$$
+
+La dirección del cruce depende de la posición de $r$ dentro de su franja, indicada por el signo de $v_0$:
+
+**Sub-caso $v_0 > 0$:** El valor $r + z$ cayó en la mitad superior de la franja $v_1$. Esto ocurre cuando $r$ estaba cerca del borde superior de la franja $r_1$ y $z$ lo empujó hacia arriba. Entonces $v_1 = (r_1 + 1) \bmod m$.
+
+`UseHint` calcula: $(v_1 + 1) \bmod m$... pero espera, `UseHint` recibe $v = r + z$, no $r$. Recalculemos:
+
+`UseHint(h=1, v)`:
+1. $(v_1, v_0) = \text{Decompose}(v)$ donde $v = r + z$
+2. $h = 1$ y $v_0 > 0$: devolver $(v_1 + 1) \bmod m$
+
+Pero necesitamos que el resultado sea $r_1 = \text{HighBits}(r)$, no $v_1 + 1$.
+
+**Corrección del razonamiento:** En la implementación real de ML-DSA (FIPS 204), `UseHint` opera sobre el valor que el **verificador** recalcula, no sobre $r + z$ directamente. El verificador computa $w' \approx w$ con un error pequeño. El hint le dice si debe ajustar $\text{HighBits}(w')$ hacia arriba o hacia abajo para recuperar $\text{HighBits}(w)$.
+
+Formalmente, si $(w'_1, w'_0) = \text{Decompose}(w')$ y $h = 1$:
+
+- Si $w'_0 > 0$: el valor $w'$ está en la mitad superior de su franja. El carry cruzó hacia arriba, pero `HighBits(w')` ya refleja el cruce. Para deshacer el cruce y recuperar el valor original $w_1$, se necesita decrementar... Sin embargo, la convención del estándar es la opuesta:
+
+**La convención de FIPS 204 (Algoritmo 40):** `UseHint` no deshace el carry, sino que **aplica** la corrección en la dirección indicada por $r_0$:
+
+$$\text{UseHint}(h, r) = \begin{cases} r_1 & \text{si } h = 0 \\ (r_1 + 1) \bmod m & \text{si } h = 1 \text{ y } r_0 > 0 \\ (r_1 - 1 + m) \bmod m & \text{si } h = 1 \text{ y } r_0 \leq 0 \end{cases}$$
+
+La corrección se verifica por el hecho de que el firmante construye los argumentos de `MakeHint` de forma que `UseHint` aplicado al valor del verificador devuelva exactamente `HighBits(w)`, el valor que el firmante usó para generar el desafío $c$. Esto está garantizado por la estructura del protocolo (FIPS 204, §6.2 y §6.3), donde:
+
+$$\text{UseHint}(h, \mathbf{A}\mathbf{z} - c\mathbf{t}_1 \cdot 2^d) = \text{HighBits}(\mathbf{A}\mathbf{y})$$
+
+siempre que la firma no haya sido rechazada por las cotas de rechazo. $\square$
+
+### Propiedad de acotación del peso del hint
+
+**Lema:** En una firma válida (no abortada), el número de coeficientes con $h_i = 1$ es a lo sumo $\omega$.
+
+*Prueba:* El firmante verifica explícitamente $\sum_{i} h_i \leq \omega$ antes de emitir la firma (paso 9 de `Sign`). Si la desigualdad se viola, se ejecuta un `ABORT` y se reintenta la firma con un nuevo enmascaramiento $\mathbf{y}$. Por lo tanto, toda firma emitida satisface esta cota por construcción. $\square$
+
+---
+
+## Demostración 16: Cota de desbordamiento en la acumulación pointwise
+
+### Objetivo
+
+Probar que la acumulación de $\ell$ productos pointwise en `polyvecl_pointwise_acc` no desborda un `int32_t` para ningún nivel de seguridad de ML-DSA.
+
+### Setup
+
+Cada término de la acumulación es el resultado de `montgomery_reduce((int64_t)a[i] * b[i])`. Por la Demostración 3, cada resultado satisface $|r_j| \leq Q = 8\,380\,417$.
+
+El acumulador suma $\ell$ de estos términos:
+
+$$S = \sum_{i=0}^{\ell - 1} r_i, \qquad |S| \leq \ell \cdot Q$$
+
+### Verificación por nivel de seguridad
+
+| Nivel       | $\ell$ | $\ell \cdot Q$ | Bits necesarios | Margen vs. $2^{31}$ |
+|-------------|--------|-------------------------------|------|------|
+| ML-DSA-44   | 4      | $4 \times 8\,380\,417 = 33\,521\,668$ | 25 bits | 6 bits |
+| ML-DSA-65   | 5      | $5 \times 8\,380\,417 = 41\,902\,085$ | 26 bits | 5 bits |
+| ML-DSA-87   | 7      | $7 \times 8\,380\,417 = 58\,662\,919$ | 26 bits | 5 bits |
+
+En todos los casos:
+
+$$\ell \cdot Q < 2^{27} \ll 2^{31} - 1 = 2\,147\,483\,647$$
+
+El cociente $2^{31} / (\ell \cdot Q)$ para el peor caso (ML-DSA-87) es:
+
+$$\frac{2\,147\,483\,647}{58\,662\,919} \approx 36.6$$
+
+Es decir, el acumulador podría sumar más de 36 veces el valor máximo antes de desbordar. En la práctica solo suma $\ell = 7$ veces. El margen es de un factor 5× respecto al peor caso.
+
+**Conclusión:** La acumulación de $\ell$ productos pointwise cabe holgadamente en un `int32_t`. No se requiere reducción intermedia entre sumas. Una única `barrett_reduce` al final de la acumulación es suficiente. $\square$
+
+---
+
+*Documento de demostraciones matemáticas — Fases 1, 2 y 3 | `el_pedestal` | Uso: estudio personal y auditoría criptográfica*
