@@ -819,7 +819,7 @@ Para entender cómo se usan estas funciones juntas, veamos el recorrido típico 
           ┌───────────────┐          ┌────────────────┐
           │ barrett_reduce │         │montgomery_reduce│
           │ salida: [-Q/2, │         │ salida: [-Q, Q] │
-          │         Q/2]   │         │                  │
+          │         Q/2]   │         │                  v│
           └───────┬───────┘          └────────┬────────┘
                   │                           │
                   ▼                           ▼
@@ -2060,3 +2060,20 @@ peso(h) ≤ ω                     ← Restricción de la firma
 ---
 
 *Guía de estudio personal — Fases 1, 2 y 3 | `el_pedestal` | ML-DSA bare-metal en C99 de 32 bits*
+
+---
+
+## Referencias y Fuentes Recomendadas
+
+Para el desarrollo de estos conceptos y la comprensión profunda de ML-DSA, toda la teoría y desarrollo se apoyan directamente en las siguientes fuentes de la verdad:
+
+1. **NIST FIPS 204:** *Module-Lattice-Based Digital Signature Standard*.
+   - Es indispensable para entender la selección de parámetros ($k, \ell, \eta, \gamma_1, d$). Todo el algoritmo y el comportamiento de la compresión y la NTT pivotan sobre lo descrito aquí.
+   - [Enlace al PDF Oficial (NIST)](https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.204.pdf)
+
+2. **PQ-Crystals Dilithium (Reference Implementation):**
+   - El código C original de la candidatura de matriz-retículo. Fue el punto de partida que sirvió como validación directa para que la aritmética condicional branchless y las reducciones de Montgomery funcionen a la primera protegiendo frente a ataques de timing sin invadir recursos costosos de 64 bits.
+   - [Repositorio en GitHub](https://github.com/pq-crystals/dilithium)
+
+3. **Arquitectura Cooley-Tukey y Gentleman-Sande:**
+   - Textos de procesamiento de señales discretas (fundamental para visualizar la mariposa invertida y los índices en formato bit-reversal sin bucles costosos de recolocación de elementos).
