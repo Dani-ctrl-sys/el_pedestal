@@ -30,7 +30,7 @@ El desarrollo y estudio de ML-DSA en *el_pedestal* sigue un ciclo orgánico y me
 
 - [x] **Fase 1:** Aritmética Modular (*Branchless, Montgomery, Barrett*).
 - [x] **Fase 2:** La NTT (*Transformada de Fourier sobre dominios finitos, Cooley-Tukey y Gentleman-Sande*).
-- [x] **Fase 3:** Compresión y Contenedores (*Vectores polinómicos, matrices, Power2Round, Decompose, Hinting*).
+- [ ] **Fase 3:** Compresión y Contenedores — *documentación teórica completada; implementación en C pendiente.*
 - [ ] **Fase 4:** Primitivas Criptográficas de Hashing (*SHAKE-128/256, Expansiones*).
 - [ ] **Fase 5:** Funciones Superiores y Ensamblaje (*KeyGen, Sign, Verify*).
 
@@ -40,7 +40,7 @@ El desarrollo y estudio de ML-DSA en *el_pedestal* sigue un ciclo orgánico y me
 
 Al ser un proyecto totalmente portátil escrito en estricto C99 de 32 bits, no tiene dependencias dinámicas (*bare-metal*).
 
-Puedes verificar la integridad criptográfica de la aritmética en el domino de evaluación NTT mediante su `Makefile`:
+Puedes verificar la integridad criptográfica de la aritmética en el dominio de evaluación NTT mediante su `Makefile`:
 
 ```bash
 make

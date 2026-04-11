@@ -2,7 +2,9 @@
 
 > **Propósito:** Documento de estudio personal con las demostraciones completas y detalladas de todas las constantes y mecanismos aritméticos de `el_pedestal`. Se asume familiaridad con álgebra de anillos, aritmética modular y representación en complemento a dos.
 >
-> Para el contexto de ingeniería y los contratos de interfaz, ver [`DESIGN.md`](../DESIGN.md).
+> - Para el contexto de ingeniería y los contratos de interfaz → [`DESIGN.md`](../DESIGN.md)
+> - Para la intuición visual y la arquitectura paso a paso → [`STUDY_GUIDE.md`](STUDY_GUIDE.md)
+> - Para las definiciones básicas y un glosario introductorio → [`CONCEPTS.md`](CONCEPTS.md)
 
 ---
 

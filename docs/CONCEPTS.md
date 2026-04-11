@@ -3,6 +3,10 @@
 > **Propósito:** Esta guía está escrita para principiantes absolutos. Si los términos matemáticos te intimidan, aquí explicaremos con metáforas y analogías cotidianas los pilares sobre los que se sustenta toda la arquitectura de ML-DSA (el algoritmo en el que se basa este proyecto), seguidos de su definición matemática rigurosa para ir calentando motores.
 >
 > 💡 *Sugerencia: Lee esta página antes de adentrarte en la `STUDY_GUIDE.md` o en las demostraciones matemáticas.*
+>
+> - Siguiente paso → [`STUDY_GUIDE.md`](STUDY_GUIDE.md) (arquitectura e intuición)
+> - Demostraciones formales → [`MATH_PROOFS.md`](MATH_PROOFS.md)
+> - Contratos de interfaz → [`DESIGN.md`](../DESIGN.md)
 
 ---
 

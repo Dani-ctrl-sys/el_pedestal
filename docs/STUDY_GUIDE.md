@@ -1,6 +1,6 @@
 # STUDY_GUIDE.md — Guía de Estudio Completa: Fases 1, 2 y 3 de `el_pedestal`
 
-> **Propósito:** Este documento es tu recurso personal de estudio. Explica **todo** lo que ocurre en las Fases 1 y 2 del proyecto: qué hace cada pieza, **por qué** la necesitamos, y cómo encajan entre sí. Está pensado para que lo leas, lo releas y te sirva de referencia cuando necesites recordar cualquier concepto.
+> **Propósito:** Este documento es tu recurso personal de estudio. Explica **todo** lo que ocurre en las Fases 1, 2 y 3 del proyecto: qué hace cada pieza, **por qué** la necesitamos, y cómo encajan entre sí. Está pensado para que lo leas, lo releas y te sirva de referencia cuando necesites recordar cualquier concepto.
 >
 > 💡 **¿Eres nuevo en la criptografía?** Empieza leyendo los [Conceptos Básicos (`CONCEPTS.md`)](CONCEPTS.md) antes de continuar.
 >
