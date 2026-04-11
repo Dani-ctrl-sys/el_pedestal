@@ -2,6 +2,8 @@
 
 > **Propósito:** Este documento es tu recurso personal de estudio. Explica **todo** lo que ocurre en las Fases 1 y 2 del proyecto: qué hace cada pieza, **por qué** la necesitamos, y cómo encajan entre sí. Está pensado para que lo leas, lo releas y te sirva de referencia cuando necesites recordar cualquier concepto.
 >
+> 💡 **¿Eres nuevo en la criptografía?** Empieza leyendo los [Conceptos Básicos (`CONCEPTS.md`)](CONCEPTS.md) antes de continuar.
+>
 > - Para los contratos de interfaz y decisiones de ingeniería → [`DESIGN.md`](../DESIGN.md)
 > - Para las demostraciones algebraicas formales → [`MATH_PROOFS.md`](MATH_PROOFS.md)
 
@@ -1733,12 +1735,12 @@ Coeficiente r⁺ ∈ [0, Q)    (Q = 8 380 417, cabe en 23 bits)
 
   Bit:  22  21  20  19  18  17  16  15  14  13  12  11  10  ...  1   0
        ├───────────────────────────────┼───────────────────────────────┤
-       │          r₁ (10 bits)         │         r₀ (13 bits)         │
-       │       parte ALTA              │       parte BAJA             │
-       │    rango: [0, 1 023]          │  rango: (-4 096, 4 096]      │
+       │          r₁ (10 bits)         │         r₀ (13 bits)          │
+       │       parte ALTA              │       parte BAJA              │
+       │    rango: [0, 1 023]          │  rango: (-4 096, 4 096]       │
        │                               │                               │
-       │    → Clave pública (t₁)       │    → Clave privada (t₀)      │
-       │    10 bits por coef.          │    13 bits por coef.         │
+       │    → Clave pública (t₁)       │    → Clave privada (t₀)       │
+       │    10 bits por coef.          │    13 bits por coef.          │
        └───────────────────────────────┴───────────────────────────────┘
 ```
 
