@@ -1,0 +1,19 @@
+<svg viewBox="0 0 500 150" xmlns="http://www.w3.org/2000/svg">
+  <style>
+    .rect { stroke: #333; stroke-width: 2px; }
+    .text { font-family: monospace; font-size: 14px; text-anchor: middle; fill: #333; }
+    .t1 { fill: #a5d6a7; }
+    .t0 { fill: #ef9a9a; }
+  </style>
+  
+  <text x="250" y="25" class="text" font-weight="bold">Registro de 32 bits original (t)</text>
+  
+  <rect x="50" y="40" width="230" height="40" class="rect t1"/>
+  <text x="165" y="65" class="text">Bits 31..13 (t1, pública)</text>
+  
+  <rect x="280" y="40" width="170" height="40" class="rect t0"/>
+  <text x="365" y="65" class="text">Bits 12..0 (t0, ruido)</text>
+
+  <line x1="280" y1="35" x2="280" y2="120" stroke="black" stroke-dasharray="5,5" stroke-width="2"/>
+  <text x="280" y="135" class="text">Corte del Bisturí (>> 13)</text>
+</svg>

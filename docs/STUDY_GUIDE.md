@@ -1077,21 +1077,7 @@ a[j+len] ──●──────→  a[j+len] = a - ω·b
 ### El código de la butterfly directa (Cooley-Tukey)
 
 > 💡 **Nota visual:** La siguiente figura ilustra el cruce de multiplicaciones y sumas simétricas.
-`mermaid
-graph LR
-    classDef main fill:#2a2a2a,stroke:#888,stroke-width:2px,color:#fff;
-    classDef zeta fill:#4a90e2,stroke:#333,stroke-width:2px,color:#fff;
-
-    A[a_j]:::main --> sum((+)) 
-    B[a_j+len]:::main --> mul(( ζ)):::zeta
-    mul --> sum
-    
-    A --> sub(( - ))
-    mul --> sub
-    
-    sum --> A2[Nuevo a_j]:::main
-    sub --> B2[Nuevo a_j+len]:::main
-`
+![Diagrama de Mariposa Cooley-Tukey](./ntt_butterfly.svg)
 
 
 ```c
@@ -1717,16 +1703,7 @@ El primero usa una potencia de 2 como divisor (barato: shifts de bits). El segun
 ## 25. Power2Round: el bisturí de los 13 bits
 
 > 💡 **Nota visual:** Representación del registro de 32 bits siendo descompuesto.
-`mermaid
-block-beta
-    columns 1
-    block:T["Registro t (32 bits enteros)"]
-        columns 32
-        A["t1 (Alta entropía, se publica)"]:18
-        B["+"]:1
-        C["t0 (Ruido, se desecha)"]:13
-    end
-`
+![Diagrama de Truncamiento Power2Round](./power2round.svg)
 
 
 La función `Power2Round` aparece en un solo lugar del algoritmo: durante la generación de claves (`KeyGen`). Su trabajo es dividir cada coeficiente del vector $\mathbf{t} = \mathbf{A} \cdot \mathbf{s}_1 + \mathbf{s}_2$ en una parte alta $r_1$ y una parte baja $r_0$, separadas por un corte en el bit 13.
