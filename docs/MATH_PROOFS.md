@@ -953,3 +953,13 @@ Es decir, el acumulador podría sumar más de 36 veces el valor máximo antes de
 ---
 
 *Documento de demostraciones matemáticas — Fases 1, 2 y 3 | `el_pedestal` | Uso: estudio personal y auditoría criptográfica*
+
+---
+
+## Referencias y Fuentes
+
+1. **NIST FIPS 204:** *Module-Lattice-Based Digital Signature Standard*. Especificación oficial del estándar ML-DSA publicado por el Instituto Nacional de Estándares y Tecnología de EE.UU. 
+   - [Enlace al PDF Oficial (NIST)](https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.204.pdf)
+2. **PQ-Crystals Dilithium:** Implementación de referencia en C del algoritmo original en el que se basa ML-DSA. El diseño en tiempo constante, la gestión del desbordamiento en 32 bits y las mariposas de la NTT proceden de este código (archivos `ref/ntt.c` y `ref/reduce.c`).
+   - [Repositorio en GitHub](https://github.com/pq-crystals/dilithium)
+3. **Base Algorítmica de FFT/NTT:** Algoritmos clásicos de decimación en tiempo (Cooley-Tukey) y en frecuencia (Gentleman-Sande) sobre anillos negacíclicos.
