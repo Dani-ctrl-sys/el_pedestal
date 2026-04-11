@@ -1508,7 +1508,7 @@ A partir de la Fase 3, todas las funciones nuevas usan `poly *` en lugar de `int
 
 ### Los vectores `polyvecl` y `polyveck`
 
-ML-DSA no trabaja con un solo polinomio: trabaja con **vectores** y **matrices** de polinomios. Las dimensiones de esos vectores dependen del nivel de seguridad elegido y se designan con las letras $k$ y $\ell$:
+ML-DSA no trabaja con un solo polinomio: trabaja con [**vectores** y **matrices** de polinomios](CONCEPTS.md#6-vectores-y-matrices-de-polinomios). Las dimensiones de esos vectores dependen del nivel de seguridad elegido y se designan con las letras $k$ y $\ell$:
 
 - Un **`polyvecl`** es un vector de $\ell$ polinomios. Almacena la clave secreta $\mathbf{s}_1$, el enmascaramiento $\mathbf{y}$, y la firma $\mathbf{z}$.
 - Un **`polyveck`** es un vector de $k$ polinomios. Almacena la clave pública $\mathbf{t}$, la clave secreta $\mathbf{s}_2$, el compromiso $\mathbf{w}$, y el vector de hints $\mathbf{h}$.
@@ -1689,7 +1689,7 @@ La clave pública incluye el vector $\mathbf{t}$ de $k = 4$ polinomios. Sin comp
 
 Pero un coeficiente de 23 bits contiene más precisión de la que el verificador necesita. Si dividimos cada coeficiente en una parte "alta" (los bits más significativos) y una parte "baja" (los menos significativos), podemos descartar la parte baja de la clave pública y transmitir solo la parte alta. La parte baja se almacena en la clave privada y se usa internamente durante la firma.
 
-ML-DSA emplea **dos mecanismos de división** distintos, cada uno adaptado a un contexto diferente:
+ML-DSA emplea [**dos mecanismos de división**](CONCEPTS.md#7-compresión-power2round-y-decompose) distintos, cada uno adaptado a un contexto diferente:
 
 | Mecanismo      | Divisor           | Quién lo usa | Para qué                                  |
 |----------------|-------------------|--------------|-----------------------------------------|
@@ -1863,7 +1863,7 @@ En ninguno de estos casos, el valor de entrada depende de la clave privada. Las 
 
 ### El problema de la frontera
 
-Este es quizás el concepto más sutil de todo ML-DSA. Para entenderlo, necesitamos ver el panorama completo del esquema de firma:
+Este es quizás el concepto más sutil de todo ML-DSA (ver [analogía y definición en el glosario](CONCEPTS.md#8-el-mecanismo-de-hints-pistas-de-corrección)). Para entenderlo, necesitamos ver el panorama completo del esquema de firma:
 
 1. **El firmante** genera un enmascaramiento aleatorio $\mathbf{y}$, calcula $\mathbf{w} = \mathbf{A} \cdot \mathbf{y}$, y extrae los bits altos $\mathbf{w}_1 = \text{HighBits}(\mathbf{w})$.
 2. **El firmante** genera un desafío $c$ a partir de $\mathbf{w}_1$, y produce la firma $\mathbf{z} = \mathbf{y} + c \cdot \mathbf{s}_1$.
