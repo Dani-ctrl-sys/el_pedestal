@@ -80,3 +80,53 @@ Saber esto "hackea" el comportamiento del ordenador: nos permite convertir un n�
 
 **La Definición Matemática:**
 > El **Complemento a Dos** es la representación binaria canónica de números enteros con signo. Un entero $x \in [-2^{31}, 2^{31}-1]$ se evalúa algebraicamente (sobre 32 bits) como $-b_{31} \cdot 2^{31} + \sum_{i=0}^{30} b_i 2^i$. El bit más significativo ($b_{31}$) actúa como bit formal de signo, permitiendo que las operaciones nativas de suma y resta en hardware ignoren el signo operando puramente mediante aritmética modular sobre el anillo finito de bits $\mathbb{Z}/2^{32}\mathbb{Z}$.
+
+---
+
+# Fase 3 — Vectores, Compresión y Hints
+
+---
+
+## 6. Vectores y Matrices de Polinomios
+
+**La Analogía:**
+Ya sabemos que un polinomio es un array de 256 números. Ahora imagina que metes 4 de esos arrays dentro de una caja. Esa caja es un **vector de polinomios**. Y si apilas varias cajas en una estantería formando una cuadrícula, tienes una **matriz de polinomios**.
+
+En ML-DSA, la clave pública es básicamente una estantería ($\mathbf{A}$) de $K \times L$ cajones, donde cada cajón contiene un polinomio de 256 números. La clave secreta son dos cajas ($\mathbf{s}_1$, $\mathbf{s}_2$) llenas de polinomios con coeficientes muy pequeños (secretos). El acto de multiplicar la estantería por la caja secreta ($\mathbf{t} = \mathbf{A} \cdot \mathbf{s}_1 + \mathbf{s}_2$) es lo que genera la clave pública.
+
+**La Definición Matemática:**
+> Un **vector polinómico** $\mathbf{v} \in R_q^k$ es una tupla ordenada de $k$ elementos del anillo $R_q = \mathbb{Z}_Q[X]/(X^{256}+1)$. Una **matriz** $\mathbf{A} \in R_q^{k \times \ell}$ es una disposición rectangular de $k \cdot \ell$ polinomios. El producto matriz-vector $\mathbf{A} \cdot \mathbf{s}$ se calcula mediante productos internos: la fila $i$-ésima del resultado es $\sum_{j=0}^{\ell-1} \mathbf{A}_{i,j} \cdot \mathbf{s}_j$, donde cada multiplicación de polinomios se realiza eficientemente en el dominio NTT.
+
+---
+
+## 7. Compresión: Power2Round y Decompose
+
+**La Analogía:**
+Imagina que tienes una fotografía de 23 megapíxeles (un coeficiente de 23 bits), pero necesitas enviarla por una conexión lenta. La solución obvia es comprimir la foto: separar la información importante (las formas y los colores principales) de los detalles finos (el grano, el "ruido"). Envías solo lo importante y guardas el detalle en privado.
+
+Eso es exactamente lo que hacen **Power2Round** y **Decompose**: cortan cada número de 23 bits en dos trozos.
+
+- **Power2Round** usa unas tijeras muy simples: corta por el bit 13, como quien arranca las últimas 13 páginas de un libro. Es rápido y barato (un simple desplazamiento de bits `>> 13`). Se usa una sola vez durante la generación de claves.
+- **Decompose** usa un bisturí más sofisticado: divide por un número $\alpha$ que **no** es potencia de 2 (por ejemplo 190.464), lo que requiere una división "de verdad". Se usa durante cada firma y cada verificación. Es más costoso, pero produce franjas uniformes que encajan mejor con la geometría del esquema de rechazo.
+
+**La Definición Matemática:**
+> **Power2Round** descompone un coeficiente $r \in \mathbb{Z}_Q$ como $r = r_1 \cdot 2^d + r_0$, donde $d = 13$, $r_1 = \lfloor (r + 2^{d-1}) / 2^d \rfloor$ es la **parte alta** (10 bits, se publica), y $r_0 = r - r_1 \cdot 2^d$ es la **parte baja** centrada en $(-2^{d-1}, 2^{d-1}]$ (se guarda en privado).
+>
+> **Decompose** descompone $r$ como $r = r_1 \cdot \alpha + r_0$, donde $\alpha = 2\gamma_2$. El cociente $r_1$ se llama **HighBits** y el residuo $r_0$ se llama **LowBits**. El caso especial $r = Q-1$ se trata forzando $r_1 = 0$ y $r_0 = r - 1$ para que $r_1$ nunca exceda el rango $[0, (Q-1)/\alpha)$.
+
+---
+
+## 8. El Mecanismo de Hints (Pistas de Corrección)
+
+**La Analogía:**
+Imagina que dos personas están midiendo la misma pared con reglas diferentes. El firmante mide con una regla de precisión milimétrica y obtiene "3 metros y 47 centímetros". El verificador mide con una regla más tosca y obtiene "3 metros y 52 centímetros". Las partes altas coinciden ("3 metros"), pero los centímetros difieren un poco. El problema es: ¿y si la diferencia de centímetros hace que uno redondee a "3 metros" y el otro a "4 metros"? Eso sería un desastre criptográfico: la firma se rechazaría aunque fuera auténtica.
+
+Para solucionar esto, el firmante incluye una **pista (hint)** en la firma: un simple bit que dice "ojo, en esta posición yo obtuve un redondeo diferente al que tú vas a obtener, así que súmale uno a tu resultado". Con esa pista de un solo bit, el verificador puede corregir su medición y ambos acaban con la misma parte alta, sin que el verificador necesite conocer la clave secreta.
+
+**La Definición Matemática:**
+> Sea $r = r_1 \cdot \alpha + r_0$ la descomposición del valor del firmante, y sea $r' = r + z$ el valor perturbado que calcula el verificador (donde $z$ es parte de la firma). Definimos:
+>
+> $$\text{MakeHint}(r_0, r') = \begin{cases} 1 & \text{si } \text{HighBits}(r) \neq \text{HighBits}(r') \\ 0 & \text{si } \text{HighBits}(r) = \text{HighBits}(r') \end{cases}$$
+>
+> El hint $h \in \{0, 1\}^N$ es un vector de bits booleanos. La función **UseHint** permite al verificador recuperar $\text{HighBits}(r)$ a partir de $r'$ y $h$ sumando o restando 1 al cociente alto cuando $h_i = 1$, sin conocer $r_0$ ni la clave secreta.
+> La firma impone una cota máxima $\omega$ al número de hints activos ($\sum h_i \leq \omega$), limitando así el tamaño de la firma y evitando que un adversario abuse del mecanismo.
