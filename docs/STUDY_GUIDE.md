@@ -251,7 +251,7 @@ Porque cada técnica está optimizada para un tipo de operación distinto, y usa
 
 - **Barrett** es ideal para reducciones simples de 32 bits (tras sumas o restas acumuladas). No requiere cambio de dominio: la entrada y la salida están en el dominio normal. Su debilidad es que solo acepta entradas en rangos moderados (32 bits), no el producto completo de 64 bits de dos coeficientes.
 
-- **Juntas** cubren todos los casos del algoritmo sin solapamiento ni lagunas. Cada `montgomery_reduce` en la NTT va seguido eventualmente de operaciones de suma/resta que se normalizan con `barrett_reduce`. El diseño es limpio y sin redundancias.
+- **Juntas** cubren todos los casos del algoritmo sin solapamiento ni lagunas. Cada `montgomery_reduce` en la [NTT](CONCEPTS.md#3-la-ntt-transformada-teórica-de-números) va seguido eventualmente de operaciones de suma/resta que se normalizan con `barrett_reduce`. El diseño es limpio y sin redundancias.
 
 Analizadas las dos estrategias, comencemos por la más especializada: la reducción de Montgomery, que resuelve el caso de los productos de 64 bits.
 
@@ -305,7 +305,7 @@ int32_t t = (int32_t)a * QINV;
 **¿Qué ocurre aquí?**
 - `(int32_t)a` toma solo los **32 bits inferiores** de `a` (truncamiento). Llamémoslo `a_low`.
 - Se multiplica `a_low` por `QINV` (el inverso de `Q` módulo `2^32`).
-- El resultado se trunca de nuevo a 32 bits. Esto implica que todo el cálculo ocurre **módulo 2^32** de forma implícita (gracias al desbordamiento natural de los enteros de 32 bits en complemento a dos).
+- El resultado se trunca de nuevo a 32 bits. Esto implica que todo el cálculo ocurre **módulo 2^32** de forma implícita (gracias al desbordamiento natural de los enteros de 32 bits en [complemento a dos](CONCEPTS.md#5-el-complemento-a-dos-representación-de-números)).
 
 **¿Por qué hacemos esto?**
 El objetivo de `t` es ser el número mágico que, al multiplicarse por `Q`, "anula" exactamente los 32 bits inferiores de `a`. Es decir, queremos que `a - t*Q` tenga sus 32 bits inferiores todos a cero, para que la posterior división por `2^32` sea exacta (sin pérdida de información).
@@ -376,7 +376,7 @@ $$= (a_{high} - X) \cdot 2^{32}$$
 Si expulsamos los ceros con la incisión fina de la división (`>> 32`), el núcleo rescatado es exactamente `(a_high - X)`.
 Esa misteriosa variable $X$ resultante era el factor corrector algorítmico, y su resta hace un mapeo de calibración milimétrica para que el resultado final emitido sea homomórficamente $a \cdot R^{-1} \pmod Q$.
 
-**4. ¿Uso de Ramificaciones Selectivas (Branchless/Constant Time) para números Negativos?**
+**4. ¿Uso de Ramificaciones Selectivas ([Branchless](CONCEPTS.md#4-diseño-branchless-tiempo-constante)/Constant Time) para números Negativos?**
 A causa de los *cast* de variable, del overflow natural modular y propiedades del *Complemento a dos*, la variable `t` o el residuo del cálculo pueden arrojar arbitrariamente variables supermasivas negativas (`a - (-gigante) = a + gigante`). Como este cruce es estocástico... ¿cómo opera el procesador con estos valores cruzados sin bifurcar su toma de decisión en condicionales?
 Respuesta: Programación **Branchless**.
 No se corre absolutamente *ningún `if`*. No hay ningún observador leyendo que `t < 0` para activar "tácticas condicionales y restarle Q o aplicar ceros y unos". La electricidad invade todos los canales ininterrumpidamente tomando al bit de signo nativa del registro superior como peso incondicional de negatividad, cruzando los transistores *siempre en el mismo conteo de nanosegundos*. Nada parpadea ni retrasa, manteniendo tu algoritmo de Montgomery invulnerable a los ataques de Canal Lateral (Timing Attacks).
@@ -673,7 +673,7 @@ Tenemos las cuatro herramientas aritméticas completas. Pero si las implementár
 
 ---
 
-## 7. Seguridad de Tiempo Constante
+## 7. Seguridad de [Tiempo Constante](CONCEPTS.md#4-diseño-branchless-tiempo-constante)
 
 ### ¿Por qué es esto tan importante?
 
@@ -962,7 +962,7 @@ Si `w^256 = -1`, entonces `w^512 = (-1)^2 = 1`. Pero `w^256 ≠ 1`. Por tanto, `
 
 Porque el anillo `Z_Q[X] / (X^256 + 1)` es el anillo de polinomios **ciclotómico** que ML-DSA necesita para la seguridad del esquema lattice-based.
 
-> **¿Qué significa "ciclotómico"?** La palabra viene del griego *kyklos* (círculo) + *temnein* (cortar). Un **polinomio ciclotómico** `Φₙ(X)` es el polinomio mínimo cuyas raíces son las raíces primitivas *n*-ésimas de la unidad. En nuestro caso, `X^256 + 1 = Φ₅₁₂(X)`: sus raíces complejas son exactamente las raíces primitivas 512-ésimas de la unidad. El hecho de que `Φ₅₁₂(X)` sea irreducible sobre los enteros (`Z`) garantiza que el anillo `Z_Q[X] / (Φ₅₁₂(X))` tenga la estructura algebraica "rígida" necesaria para que los problemas de retículas (*lattice problems*) sobre los que se basa ML-DSA sean demostrablemente difíciles.
+> **¿Qué significa "ciclotómico"?** La palabra viene del griego *kyklos* (círculo) + *temnein* (cortar). Un **polinomio ciclotómico** `Φₙ(X)` es el [polinomio](CONCEPTS.md#2-los-polinomios-vectores) mínimo cuyas raíces son las raíces primitivas *n*-ésimas de la unidad. En nuestro caso, `X^256 + 1 = Φ₅₁₂(X)`: sus raíces complejas son exactamente las raíces primitivas 512-ésimas de la unidad. El hecho de que `Φ₅₁₂(X)` sea irreducible sobre los enteros (`Z`) garantiza que el anillo `Z_Q[X] / (Φ₅₁₂(X))` tenga la estructura algebraica "rígida" necesaria para que los problemas de retículas (*lattice problems*) sobre los que se basa ML-DSA sean demostrablemente difíciles.
 
 ### La constante ζ = 1753
 
