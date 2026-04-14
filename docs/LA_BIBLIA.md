@@ -420,7 +420,7 @@ Salida:     a' = a + ω·b
 
 Si dibujas las conexiones, forman una "X" que se asemeja a las alas de una mariposa:
 
-![Operación Mariposa (Butterfly) Cooley-Tukey con factor de torsión en la rama inferior](c:/EL_PEDESTAL/docs/img/ntt_butterfly.svg)
+![Operación Mariposa (Butterfly) Cooley-Tukey con factor de torsión en la rama inferior](./img/ntt_butterfly.svg)
 
 **Código — Butterfly directa (Cooley-Tukey):**
 
@@ -1419,7 +1419,7 @@ La clave es que $r^+ = r_1 \cdot 2^{13} + r_0$, lo que permite reconstruir $r^+$
 
 ### Mapa de bits de un coeficiente
 
-![Distribución de los bits tras PowerRound divisor 2^13](c:/EL_PEDESTAL/docs/img/power2round.svg)
+![Distribución de los bits tras PowerRound divisor 2^13](./img/power2round.svg)
 
 
 **¿Cuánto ahorramos?** La clave pública $\mathbf{t}_1$ ocupa 10 bits por coeficiente en vez de 23:
@@ -1676,13 +1676,151 @@ int32_t lowbits(int32_t a) {
 
 ## 5.1 Desincronización en fronteras y el vector de pistas ($\mathbf{h}$)
 
-*(Pendiente de desarrollo.)*
+### El problema de la información parcial
+
+Durante la firma, el firmante calcula el compromiso $\mathbf{w} = \mathbf{A} \cdot \mathbf{y}$ y extrae sus bits altos $\mathbf{w}_1 = \text{HighBits}(\mathbf{w})$. Este valor se hashea para generar el desafío $c$. El objetivo del verificador es reconstruir exactamente $\mathbf{w}_1$ para comprobar el hash.
+
+Pero el verificador no tiene la clave privada completa. Reconstruye el compromiso como $\mathbf{w}' = \mathbf{A} \cdot \mathbf{z} - c \cdot \mathbf{t}_1 \cdot 2^d$. Debido a que en la clave pública descartamos deliberadamente los bits bajos $\mathbf{t}_0$ (Tema 3), el valor que el verificador obtiene es una aproximación: 
+$\mathbf{w}' = \mathbf{w} - c \cdot \mathbf{s}_2 + c \cdot \mathbf{t}_0$.
+
+Al aplicar $\text{HighBits}(\mathbf{w}')$, ¿obtiene el verificador el mismo $\mathbf{w}_1$ original? **Casi siempre**. Pero si el valor $\mathbf{w}$ original estaba muy cerca de la frontera de una franja de $\alpha = 2\gamma_2$, la perturbación introducida por $+ c \cdot \mathbf{t}_0$ podría "empujarlo" hacia la franja adyacente. 
+
+**Ejemplo numérico en $\mathbb{Z}_Q$:**
+Supongamos $\alpha = 190\,464$ (ML-DSA-44). Las franjas cambian en múltiplos de $\alpha$.
+- El firmante obtiene $\mathbf{w} = 190\,460$. Al aplicar `Decompose`, la parte alta es $\mathbf{w}_1 = 0$, y el residuo es $190\,460 = \alpha - 4$, muy cerca de cruzar a la zona 1.
+- El verificador desconoce el error $z = - c \cdot \mathbf{t}_0$. Digamos que el error vale $10$.
+- El verificador calcula $\mathbf{w}' = \mathbf{w} + 10 = 190\,470$.
+- Al aplicar `Decompose`, el verificador obtiene $\mathbf{w}_1' = 1$ (porque $\mathbf{w}' \ge \alpha$).
+¡El verificador usaría $\mathbf{w}_1' = 1$ para el hash, fallando la firma irremediablemente!
+
+### La solución: el vector booleano de pistas
+
+Para corregir esto, el firmante calcula un vector de pistas (*hints*) $\mathbf{h}$. Por cada coeficiente de $\mathbf{w}'$, el firmante comprueba si la perturbación provocará un cambio de franja. Si es así, emite un "1". Si no, emite un "0".
+
+Este mecanismo permite corregir la desviación sin revelar $\mathbf{t}_0$. El "1" le dice al verificador: *"El error de descarte te ha cambiado de zona; usa la zona adyacente para reconstruir el hash"*. 
+
+### Ingeniería de `MakeHint` y `UseHint`
+
+Las funciones base operan escalonadamente por coeficiente.
+
+**Código — `make_hint` (lado del firmante):**
+
+```c
+int32_t make_hint(int32_t z, int32_t r) {
+    int32_t r1 = highbits(r);
+    int32_t v1 = highbits(r + z);
+    return (r1 != v1);
+}
+```
+
+El firmante invoca `MakeHint(-c * t0, w')` porque sabe perfectamente lo que el verificador va a calcular ($r = \mathbf{w}'$) y conoce el error exacto que el verificador ignora ($z = -c \cdot \mathbf{t}_0$). Si sumar el error restaurado cambia los bits altos, el hint es 1.
+
+A nivel de vector, la función cuenta cuántos hints activos se han generado (crucial para no superar $\omega$):
+
+```c
+unsigned int poly_make_hint(poly *h, const poly *z, const poly *r) {
+    unsigned int i, s = 0;
+    for (i = 0; i < N; ++i) {
+        h->coeffs[i] = make_hint(z->coeffs[i], r->coeffs[i]);
+        s += h->coeffs[i]; /* Acumula el número total de pistas */
+    }
+    return s;
+}
+```
+
+**Código — `use_hint` (lado del verificador):**
+
+```c
+int32_t use_hint(int32_t h, int32_t a) {
+    int32_t a1, a0;
+    decompose(&a1, &a0, a);
+    if (h == 0) return a1;                 /* Sin desvío: usar zona calculada */
+    
+    if (a0 > 0)                            /* Desvío hacia arriba */
+        return (a1 == M - 1) ? 0 : a1 + 1; /* Retornar zona superior (con modularidad) */
+    
+    return (a1 == 0) ? M - 1 : a1 - 1;     /* Desvío hacia abajo: retornar zona inferior */
+}
+```
+
+Si `h = 1`, el verificador reacciona observando su propio residuo centrado `a0`. Si `a0 > 0`, significa que el error le lanzó hacia arriba, cruzando la frontera superior; entonces ajusta sumando 1 a `a1`. Si es negativo, ajusta restando 1. Las validaciones con `M - 1` y `0` manejan la continuidad cíclica en el corner case de $\mathbb{Z}_Q$.
+
+> **Demostración 15 — La hermeticidad del Hint:**
+>
+> **Paso 1: ¿Por qué el verificador obtiene $\mathbf{w}' = \mathbf{w} - c\mathbf{s}_2 + c\mathbf{t}_0$?**
+> $\mathbf{w}' = \mathbf{A}\mathbf{z} - c\mathbf{t}_1 2^d$. Sustituyendo $\mathbf{z} = \mathbf{y} + c\mathbf{s}_1$ y $\mathbf{t}_1 2^d = \mathbf{A}\mathbf{s}_1 + \mathbf{s}_2 - \mathbf{t}_0$:
+> $\mathbf{w}' = \mathbf{A}(\mathbf{y} + c\mathbf{s}_1) - c(\mathbf{A}\mathbf{s}_1 + \mathbf{s}_2 - \mathbf{t}_0) = \mathbf{A}\mathbf{y} + c\mathbf{A}\mathbf{s}_1 - c\mathbf{A}\mathbf{s}_1 - c\mathbf{s}_2 + c\mathbf{t}_0 = \mathbf{w} - c\mathbf{s}_2 + c\mathbf{t}_0$. $\checkmark$
+>
+> **Paso 2: ¿Qué parte alta necesita recuperar el verificador?**
+> A causa del condicional de aborto en `Sign` ($\| \text{LowBits}(\mathbf{w} - c\mathbf{s}_2) \|_\infty < \gamma_2 - \beta$), la resta del secreto $c\mathbf{s}_2$ es lo suficientemente pequeña como para NO cambiar los bits altos de $\mathbf{w}$. Por tanto: $\text{HighBits}(\mathbf{w} - c\mathbf{s}_2) = \text{HighBits}(\mathbf{w}) = \mathbf{w}_1$.
+> El verificador tiene $\mathbf{w}' = (\mathbf{w} - c\mathbf{s}_2) + c\mathbf{t}_0$. Necesita recuperar la zona de $(\mathbf{w} - c\mathbf{s}_2)$.
+>
+> **Paso 3: Mecánica de corrección:**
+> Aplicando $\text{MakeHint}(-c\mathbf{t}_0, \mathbf{w}')$: si $\text{HighBits}(\mathbf{w}') \neq \text{HighBits}(\mathbf{w}' - c\mathbf{t}_0) = \mathbf{w}_1$, emite $h = 1$.
+> El verificador en `UseHint` ve si el residuo centrado de $\mathbf{w}'$ es positivo (cruzó la frontera superior) o negativo (cruzó la inferior) y corrige $\pm 1$ garantizando regresar unívocamente a $\mathbf{w}_1$. El uso de residuos centrados $\bmod^\pm \alpha$ en lugar de módulos positivos es estricta y algebraicamente lo que permite a la heurística conocer la direccionalidad exacta del desbordamiento sin falsos positivos. $\square$
 
 ---
 
 ## 5.2 Determinismo de memoria estática ($\omega$) y el cortafuegos Fiat-Shamir
 
-*(Pendiente de desarrollo.)*
+### El coste de un hint y la restricción estricta de peso $\omega$
+
+Cada vez que el firmante debe enviar un "1" en el vector $\mathbf{h}$, está filtrando un poco de información estructural sobre las fronteras de cálculo y sobre $\mathbf{t}_0$. Además, $\mathbf{h}$ es un vector inmenso ($k \times 256$ polinomios, por dar un ejemplo, en ML-DSA-87 serían 2048 booleanos).
+
+Para que la serialización de este vector funcione en un sistema embebido con recursos limitados y, además, produzca firmas de **tamaño estrictamente constante**, el estándar impone una restricción draconiana: un vector de pistas **no puede tener más de $\omega$ "unos" en total.**
+
+```
+ML-DSA-44: ω = 80   (de 1024 coeficientes)
+ML-DSA-65: ω = 55   (de 1536 coeficientes)
+ML-DSA-87: ω = 75   (de 2048 coeficientes)
+```
+
+**Si una ejecución de la firma genera más de $\omega$ pistas... ¿qué hace el programa?**
+Simplemente **aborta** esa firma (la descarta), muestrea un nuevo ruido $\mathbf{y}$ y vuelve a empezar iterativamente. Es el marco de trabajo probabilístico introducido por Vadim Lyubashevsky conocido como **Fiat-Shamir con Abortos** (*Fiat-Shamir with Aborts*).
+
+### Ausencia de memoria dinámica y formato en `Encode`
+
+Esta restricción transversal es un salvavidas en C99 bare-metal. 
+Mandar un array puro de 2048 bits destrozaría el propósito de comprimir la firma. Por eso ML-DSA comprime el vector $\mathbf{h}$ almacenando únicamente **los índices posicionales relativos** de los coeficientes limitados que valen 1.
+
+Como sabemos matemáticamente que nunca habrá más de $\omega$ pistas válidas, el búfer de salida para el vector $\mathbf{h}$ en el array intermedio y final se asigna de forma estática pura a `OMEGA + K` bytes:
+
+**Formato exacto en memoria del empaquetado de Hints:**
+1. Un bloque inicial de $\omega$ bytes que contienen las posiciones relativas (valores dispersos de 0 a 255) de cada "1" cronológico.
+2. Un bloque delimitador final secundario de $k$ bytes que actúan como umbrales acumulativos indicando el punto divisorio entre los bloques posicionales de cada respectivo sub-polinomio.
+
+```c
+/* Empaquetado estático del vector h en el RFC/FIPS */
+unsigned int ptr = 0;
+for(unsigned int i = 0; i < K; ++i) {
+    for(unsigned int j = 0; j < N; ++j) {
+        if(h->vec[i].coeffs[j] != 0) {
+            sig[ptr++] = j; /* Guarda la posición relativa (0-255) en un byte */
+        }
+    }
+    sig[OMEGA + i] = ptr;   /* Transfiere el índice delimitador del polinomio superior */
+}
+/* Asegurar relleno constante en el resto de la traza para evitar filtraciones colaterales: */
+while (ptr < OMEGA) {
+    sig[ptr++] = 0; // Padding sin utilidad hasta consolidar array OMEGA posicional
+}
+```
+
+Beneficios críticos del diseño en criptografía embebida:
+- Ningún paquete variará su tamaño a red en medio de un cifrado simétrico (garantiza TLS record payload padding estable): la firma siempre ocupa la misma precisa cantidad de bytes.
+- Ninguna capa superior requerirá instanciar OS allocations como `malloc` dinámico en RAM para acomodar arrays crecientes.
+- El verificador aborta validaciones algorítmicas instantáneamente en la capa semántica de desempaquetado si nota índices malformados, escudando activamente la validación temporal al núcleo profundo de montgomery y matrix arrays.
+
+> **Demostración 16 — Fiat-Shamir con Abortos y el Lema de Lyubashevsky (Rejection Sampling):**
+>
+> Sea un esquema donde el estado algorítmico interno dependa linealmente de sumandos secretos base: $\mathbf{z} = \mathbf{y} + c\mathbf{s}_1$. 
+>
+> 1. **La Fuga Estadística Directa ("Statistical Leakage"):** Si publicamos rutinariamente iteraciones de $\mathbf{z}$ sin constricciones liminales, su valor esperado a lo largo de un historial masivo de capturas interceptadas revelará progresivamente $\mathbb{E}[\mathbf{z}] = \mathbb{E}[\mathbf{y}] + \mathbb{E}[c\mathbf{s}_1] = 0 + \bar{c}\mathbf{s}_1$. Un adversario con poder pasivo promedio haría el matching aditivo y recuperaría limpiamente y sin computación percutida el fragmento original secreto $\mathbf{s}_1$.
+>
+> 2. **Ocultación Ciega mediante Rechazo Escolar (Rejection Sampling):** Definimos categóricamente que el vector interno $\mathbf{z}$ no puede sobreescribir la cota $\gamma_1 - \beta$. Como el núcleo ruido inicial $\mathbf{y}$ se muestrea uniformemente a fuerza bruta en el hipercubo base extendido $[-\gamma_1 + 1, \gamma_1 - 1]$, el vector posicional final desplazado $\mathbf{z}$ percutirá iterativamente la restricción del hipercubo perimetral. Dicho desvío tiene una tasa probable vinculada estadísticamente e identitariamente al factor asimétrico del reto $c\mathbf{s}_1$.
+> Imponiendo unilateralmente esta amputación inestocástica de lo considerado "casos asimétricos fugantes", cercenamos linealmente cualquier dispersión condicional de las colas estadísticas directas. La función resultante densa asume así en iteraciones exitosas el bloque univariante puro absoluto perfecto, limitándose temporal e idealmente independiente de combinaciones residuales originarias en la variable de clave privada $\mathbf{s}_1$. La distancia estadística asintótica entre un registro validado publicable $\mathbf{z}$ sobre una red y un genuino hiper-volcado aleatorio natural de entropía total es numéricamente igual a *cero absoluto*.
+>
+> 3. **Caché Integral y Coste Computacional Promedio:** En los niveles estandarizados finales de ML-DSA (44 a 87), la probabilidad combinatoria en iteraciones y retenciones simultáneas de bucle algorítmico de aprobar todas las cribas del aborto determinista (el hipercubo global absoluto $\beta-\gamma_1$, la normalización compromisoria lineal $\gamma_2 - \beta$, la contada exigencia aritmética paralela de las liminales y transversales $\omega$ limitadas binariamente a la vectorización topológica final) oscila empíricamente una media teórica del $15\%$ al $25\%$ absoluto. Es decir, el runtime computacional sacrifica en silicio de 4.5 a 7 bucles abortivos puros con variables frescas pseudoaleatorias internas hasta conseguir empaquetar, exportar e imprimir serialmente el resultado a salida. Este gasto transitorio offline, de peso inapreciable a nivel interactivo precomputacional humano, constituye integralmente la mayor piedra criptográfica fundacional Post-Cuántica de las estructuras polinómicas para evadir rotaciones del algoritmo primigenio de Grover o las secuencias Shor vectoriales. $\square$
 
 ---
 ---
