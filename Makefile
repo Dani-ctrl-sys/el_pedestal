@@ -6,6 +6,10 @@
 CC      := gcc
 CFLAGS  := -Wall -Wextra -Werror -Wpedantic -O2 -std=c99 -I./inc
 
+ifdef DILITHIUM_MODE
+CFLAGS += -DDILITHIUM_MODE=$(DILITHIUM_MODE)
+endif
+
 # Directorios
 SRC_DIR   := src
 INC_DIR   := inc

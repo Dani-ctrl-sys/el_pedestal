@@ -157,7 +157,9 @@ ML-DSA necesita **ambas** representaciones:
 - La **reducción de Barrett** produce resultados centrados $[-Q/2, Q/2]$. Útil porque los valores centrados son más pequeños en valor absoluto, reduciendo el riesgo de desbordamiento en cálculos posteriores.
 - La función `conditional_subq` produce resultados en el rango canónico $[0, Q)$. Necesario al final, cuando hay que **serializar** los coeficientes.
 
-Un polinomio en ML-DSA es simplemente un array de exactamente 256 de estos números modulares. Todo opera en el anillo cociente $R_q = \mathbb{Z}_Q[X]/(X^{256} + 1)$: si al multiplicar aparece un término $X^{256}$, se sustituye automáticamente por $-1$ (reducción negacíclica).
+Un polinomio en ML-DSA es simplemente un array de exactamente 256 de estos números modulares.
+
+**El anillo cociente $R_q$:** Todos los polinomios del algoritmo viven en el espacio $R_q = \mathbb{Z}_Q[X]/(X^{256} + 1)$. ¿Qué significa eso? Imaginemos que el polinomio es una recta numérica que solo tiene 256 casillas (grados 0 a 255). Si al multiplicar dos polinomios obtienes un término con $X^{256}$ o superior, "se sale de la recta". La regla del anillo cociente dice: cada vez que aparezca $X^{256}$, sustitúyelo por $-1$. Es como un reloj, pero para polinomios: cuando llegas al final, das la vuelta con signo negativo (reducción negacíclica). Esto mantiene todos los resultados dentro de las 256 casillas.
 
 ### ¿Por qué no usar `int64_t` para todo?
 
@@ -631,7 +633,7 @@ void poly_invntt(int32_t a[256]) {
 >
 > **Cota del resultado:** Si $|a| \leq Q \cdot 2^{32}$, entonces $|r| = |(a - tQ)/2^{32}| \leq Q$. En la práctica con $|a| < Q^2 < 2^{47}$, la cota es $|r| \leq Q$. $\square$
 
-> **Demostración 10 — Corrección de la butterfly de Cooley-Tukey:**
+> **Demostración 4 — Corrección de la butterfly de Cooley-Tukey:**
 >
 > La butterfly $(a, b) \mapsto (a + \omega b, \; a - \omega b)$ es una transformación lineal con matriz:
 > $$M = \begin{pmatrix} 1 & \omega \\ 1 & -\omega \end{pmatrix}$$
@@ -641,11 +643,12 @@ void poly_invntt(int32_t a[256]) {
 >
 > Esta es la butterfly inversa (Gentleman-Sande): primero suma/resta, luego multiplica por $\omega^{-1}$.
 >
-> *Nota técnica:* En `poly_invntt`, la variable `zeta` = $-(-\omega^{-1}) = \omega^{-1}$, por la negación explícita `-zetas[k--]`.
+> *Nota técnica:* En la INTT, la variable `zeta` del código almacena el inverso de la raíz: $\omega^{-1}$. Esto se consigue recorriendo la tabla `zetas[]` en orden descendente y negando el valor leído.
 >
-> **Preservación de la equivalencia modular:** $\text{montgomery\_reduce}(\zeta_{\text{mont}} \cdot b) = (\zeta \cdot R \cdot b)/R = \zeta \cdot b \pmod{Q}$. Los factores $R$ se cancelan exactamente. $\square$
+> **Preservación de la equivalencia modular:**
+> En cada butterfly, la reducción de Montgomery computa $(\zeta_{\text{mont}} \cdot b) / R$. Como las zetas están prealmacenadas multiplicadas por $R$ (ver §1.3), los factores se cancelan: $(\zeta \cdot R \cdot b) / R = \zeta \cdot b \pmod{Q}$. $\square$
 
-> **Demostración 11 — La INTT es la inversa exacta de la NTT:**
+> **Demostración 5 — La INTT es la inversa exacta de la NTT:**
 >
 > La NTT es $\hat{a} = W \cdot a$ con $W_{ij} = \omega_i^j$. La INTT es $a = \frac{1}{N}\bar{W} \cdot \hat{a}$ con $\bar{W}_{ij} = \omega_i^{-j}$.
 >
@@ -671,7 +674,7 @@ ML-DSA no trabaja en el anillo $\mathbb{Z}_Q[X]/(X^{256} - 1)$, sino en $\mathbb
 
 Si $w^{256} = -1$, entonces $w^{512} = (-1)^2 = 1$. Pero $w^{256} \neq 1$. Por tanto, $w$ tiene orden exactamente **512**.
 
-**¿Por qué $\mathbb{Z}_Q[X]/(X^{256} + 1)$ y no $(X^{256} - 1)$?** Porque $X^{256} + 1 = \Phi_{512}(X)$ es un polinomio ciclotómico cuya irreducibilidad sobre $\mathbb{Z}$ garantiza la estructura algebraica rígida necesaria para que los problemas de retículas (lattice problems) sobre los que se basa ML-DSA sean demostrablemente difíciles.
+**¿Por qué $\mathbb{Z}_Q[X]/(X^{256} + 1)$ y no $(X^{256} - 1)$?** El polinomio $X^{256} + 1$ es lo que se llama un **polinomio ciclotómico** ($\Phi_{512}(X)$): un polinomio especial que no puede descomponerse en factores más simples con coeficientes enteros (es *irreducible* sobre $\mathbb{Z}$). Esta propiedad es crucial: garantiza que el anillo $R_q$ tenga una estructura algebraica rígida y sin "atajos", lo que hace que los problemas de retículas (*lattice problems*) sobre los que se basa la seguridad de ML-DSA sean demostrablemente difíciles de resolver, incluso para un computador cuántico.
 
 ### La constante ζ = 1753
 
@@ -720,7 +723,9 @@ Capa 2 (len=32,  4 bloques):   necesita ζ^32, ζ^160, ζ^96, ζ^224  → k=4,5,
 zetas[i] = ζ^(bitrev(i)) · 2^32  mod Q
 ```
 
-Porque dentro de la NTT, cada butterfly hace `montgomery_reduce((int64_t)zeta * a[j + len])`. El `montgomery_reduce` divide por $R$. Si la zeta ya tiene un factor $R$ incorporado, la reducción lo cancela: $(\zeta \cdot R \cdot b) / R = \zeta \cdot b \pmod{Q}$.
+Dentro de la NTT, cada butterfly multiplica una zeta por un coeficiente y aplica la reducción de Montgomery al resultado. La reducción divide implícitamente por $R$. Si la zeta ya lleva un factor $R$ incorporado de fábrica, la reducción lo cancela automáticamente:
+
+$$\frac{\zeta \cdot R \cdot b}{R} = \zeta \cdot b \pmod{Q}$$
 
 Las 256 conversiones se pagan **una sola vez** (off-line), y las 1792 multiplicaciones de la NTT se benefician.
 
@@ -932,11 +937,11 @@ INTT(NTT(a)) = a                   ← Propiedad fundamental
                       └─────────────────┘
 ```
 
-**Principio de economía:** No reducimos después de cada operación. Tras Barrett, los valores están en $[-Q/2, Q/2] \approx 22$ bits. Tenemos $31 - 22 = 9$ bits de margen, permitiendo acumular hasta $2^9 = 512$ coeficientes antes de desbordar.
+**Principio de economía:** No reducimos después de cada operación. Tras la reducción de Barrett, los valores quedan en el rango $[-Q/2, Q/2]$, que ocupa aproximadamente 22 bits. Como un `int32_t` tiene 31 bits de rango útil, quedan $31 - 22 = 9$ bits de margen, lo que permite acumular hasta $2^9 = 512$ sumas consecutivas antes de riesgo de desbordamiento.
 
 ### Demostraciones formales: ζ = 1753, bit-reversal, f = 41978
 
-> **Demostración 8 — $\zeta = 1753$ tiene orden 512:**
+> **Demostración 6 — $\zeta = 1753$ tiene orden 512:**
 >
 > El grupo $\mathbb{Z}_Q^*$ es cíclico de orden $Q - 1 = 2^{13} \cdot 1\,023 = 2^{13} \cdot 3 \cdot 11 \cdot 31$. Como $512 = 2^9$ divide a $Q - 1$, existe un elemento de orden exactamente 512.
 >
@@ -946,7 +951,7 @@ INTT(NTT(a)) = a                   ← Propiedad fundamental
 >
 > La segunda condición descarta todos los órdenes menores: si $\zeta^d = 1$ con $d \mid 256$, entonces $\zeta^{256} = (\zeta^d)^{256/d} = 1$, contradicción con $\zeta^{256} = -1$. $\square$
 
-> **Demostración 9 — Corrección de la permutación bit-reversal:**
+> **Demostración 7 — Corrección de la permutación bit-reversal:**
 >
 > En la NTT Cooley-Tukey, la capa $\ell$ (de 0 a 7) tiene $2^\ell$ bloques. El bloque $m$-ésimo necesita la raíz $\zeta^{\text{bitrev}_8(2^\ell + m)}$.
 >
@@ -959,7 +964,7 @@ INTT(NTT(a)) = a                   ← Propiedad fundamental
 >
 > El patrón se mantiene para todas las capas. La tabla `zetas[k]` almacena $\zeta^{\text{bitrev}_8(k)}$ (en dominio Montgomery), permitiendo que `k++` recorra las raíces en el orden exacto. $\square$
 
-> **Demostración 12 — Derivación de $f = 41\,978$:**
+> **Demostración 8 — Derivación de $f = 41\,978$:**
 >
 > **Paso 1:** $N^{-1} \bmod Q = 256^{-1} \bmod 8\,380\,417$. Por Fermat: $256^{-1} \equiv 256^{Q-2} \pmod{Q}$.
 >
@@ -979,6 +984,16 @@ INTT(NTT(a)) = a                   ← Propiedad fundamental
 ---
 
 ## 2.1 Flujo de datos y colapso de la matriz $\mathbf{A}$
+
+### La operación que domina todo: el producto matriz-vector
+
+Antes de hablar de código, entendamos qué estamos calculando. ML-DSA tiene en su núcleo una operación que se repite constantemente: multiplicar una **matriz de polinomios** $\mathbf{A}$ (de tamaño $k \times \ell$) por un **vector de polinomios** $\mathbf{s}$ (de longitud $\ell$). El resultado es otro vector de polinomios (de longitud $k$).
+
+Cada elemento del resultado es un **producto interno**: la suma de $\ell$ multiplicaciones de polinomios. Sin la NTT, cada una de esas multiplicaciones costaría $\mathcal{O}(N^2) = 65\,536$ operaciones. Con la NTT (Tema 1), cada una cuesta solo $\mathcal{O}(N) = 256$ operaciones pointwise. Pero aún así, necesitamos sumar $\ell$ de estos productos y garantizar que la acumulación no desborde un `int32_t`.
+
+Este tema cubre dos problemas de ingeniería:
+1. **¿Cómo organizamos los datos en memoria?** Necesitamos pasar de arrays desnudos a estructuras tipadas que el compilador pueda verificar.
+2. **¿Cuántas sumas podemos acumular sin reducir?** Necesitamos demostrar que el margen de bits es suficiente para evitar llamadas innecesarias a `barrett_reduce`.
 
 ### Del array al struct: el tipo `poly`
 
@@ -1305,7 +1320,7 @@ Este diseño ahorra $\ell - 1$ pasadas de reducción por coeficiente: miles de o
 
 ### Demostraciones formales: Barrett, tiempo constante, cota de acumulación
 
-> **Demostración 4 — Derivación de $m = 8$ para Barrett con $k = 26$:**
+> **Demostración 9 — Derivación de $m = 8$ para Barrett con $k = 26$:**
 >
 > $m = \lfloor 2^{26} / Q \rfloor = \lfloor 67\,108\,864 / 8\,380\,417 \rfloor = \lfloor 8.007\ldots \rfloor = 8$
 >
@@ -1315,7 +1330,7 @@ Este diseño ahorra $\ell - 1$ pasadas de reducción por coeficiente: miles de o
 >
 > Para $k = 27$: $m = \lfloor 2^{27}/Q \rfloor = 16$, igualmente válido pero menos eficiente (no es shift puro). La elección $k = 26$, $m = 8$ optimiza eficiencia (shift de 3 bits) con suficiente precisión. $\square$
 
-> **Demostración 5 — Cota de error de Barrett para entradas de 32 bits:**
+> **Demostración 10 — Cota de error de Barrett para entradas de 32 bits:**
 >
 > Sea $a$ con $|a| < 2^{31}$. Cociente exacto $q^* = a/Q$. Cociente estimado $t = \text{round}(a \cdot m / 2^k)$. Error $\delta = q^* - t$.
 >
@@ -1331,7 +1346,7 @@ Este diseño ahorra $\ell - 1$ pasadas de reducción por coeficiente: miles de o
 >
 > **Verificación** para $a = 15\,000\,000$: $t = \text{round}((15\,000\,000 \cdot 8 + 2^{25})/2^{26}) = 2$. Residuo: $15\,000\,000 - 2 \cdot 8\,380\,417 = -1\,760\,834$. $|-1\,760\,834| < Q/2 = 4\,190\,208.5$. $\checkmark$
 
-> **Demostración 6 — Inyección de $2^{25}$ para redondeo y confinamiento en $[-Q/2, Q/2]$:**
+> **Demostración 11 — Inyección de $2^{25}$ para redondeo y confinamiento en $[-Q/2, Q/2]$:**
 >
 > **Proposición:** $\lfloor x + 1/2 \rfloor = \text{round}(x)$.
 >
@@ -1343,7 +1358,7 @@ Este diseño ahorra $\ell - 1$ pasadas de reducción por coeficiente: miles de o
 >
 > **Confinamiento:** Si $a \bmod Q < Q/2$, el redondeo produce $t = q$ (cociente exacto) y $r = a \bmod Q \in [0, Q/2)$. Si $a \bmod Q \geq Q/2$, produce $t = q+1$ y $r = (a \bmod Q) - Q \in [-Q/2, 0)$. En ambos casos: $r \in [-Q/2, Q/2)$. $\square$
 
-> **Demostración 7 — Extensión de signo en complemento a dos:**
+> **Demostración 12 — Extensión de signo en complemento a dos:**
 >
 > Para `int32_t` $x$: $x \gg 31 = \lfloor x / 2^{31} \rfloor$.
 >
@@ -1353,7 +1368,7 @@ Este diseño ahorra $\ell - 1$ pasadas de reducción por coeficiente: miles de o
 >
 > **Prueba de tiempo constante:** Las instrucciones (`SAR`, `AND`, `ADD`) se ejecutan siempre. No hay bifurcaciones. El grafo de flujo es lineal. El predictor de saltos nunca observa el valor de `x`. $\square$
 
-> **Demostración 16 — Cota de desbordamiento en la acumulación pointwise:**
+> **Demostración 13 — Cota de desbordamiento en la acumulación pointwise:**
 >
 > Cada sumando satisface $|r_j| \leq Q$ (por Demostración 3). La acumulación: $|S| \leq \ell \cdot Q$.
 >
@@ -1371,7 +1386,7 @@ Este diseño ahorra $\ell - 1$ pasadas de reducción por coeficiente: miles de o
 |-----------------------------------------------------------|-------------------------------------------|-------------------------------------------------------------------------------|
 | `struct poly` con array tipado                            | Array `int32_t[256]` desnudo              | Tipado fuerte, paso por puntero seguro, alineación predecible                 |
 | Parámetros por `#define` en compilación                   | Struct de parámetros en runtime           | Sin overhead de indirección; el compilador optimiza constantes conocidas      |
-| `polyvecl_pointwise_acc` acumula sin reducción intermedia | `barrett_reduce` entre cada suma          | $\ell \cdot Q < 2^{26} \ll 2^{31}$: no hay riesgo antes de la reducción final |
+| `polyvecl_pointwise_acc` acumula sin reducción intermedia | `barrett_reduce` entre cada suma          | $\ell \cdot Q < 2^{27} \ll 2^{31}$: no hay riesgo antes de la reducción final |
 | Matriz $\mathbf{A}$ generada fila a fila                  | Materializar $\mathbf{A}$ completa en RAM | Ahorro de $(k-1) \times \ell$ KiB de RAM                                      |
 
 ---
@@ -1406,13 +1421,33 @@ ML-DSA emplea **dos mecanismos de división** distintos:
 
 El primero usa una potencia de 2 como divisor (barato: shifts de bits). El segundo usa un divisor más complejo ($2\gamma_2$, que no es potencia de 2) adaptado a la geometría del esquema de rechazo.
 
+### El módulo centrado: una herramienta que usaremos constantemente
+
+Antes de entrar en la operación, necesitamos definir con precisión una variante del operador módulo que ML-DSA usa en todas sus funciones de compresión.
+
+El **módulo estándar** $a \bmod m$ devuelve siempre un resultado en el rango $[0, m)$. Por ejemplo: $7 \bmod 4 = 3$, $5 \bmod 4 = 1$.
+
+El **módulo centrado** $a \bmod^{\pm} m$ devuelve un resultado en el rango $(-m/2, m/2]$. Conceptualmente, toma el resultado del módulo estándar y, si es mayor que la mitad del divisor, le resta el divisor para "centrarlo" alrededor de cero:
+
+$$a \bmod^{\pm} m = \begin{cases} a \bmod m & \text{si } (a \bmod m) \leq m/2 \\ (a \bmod m) - m & \text{si } (a \bmod m) > m/2 \end{cases}$$
+
+**Ejemplo con $m = 8$:**
+
+| $a$ | $a \bmod 8$ (estándar) | $a \bmod^{\pm} 8$ (centrado) |
+|-----|------------------------|------------------------------|
+| 3   | 3                      | 3 (≤ 4, se queda)            |
+| 5   | 5                      | 5 − 8 = −3 (> 4, se centra) |
+| 12  | 4                      | 4 (= 4, se queda)            |
+| 15  | 7                      | 7 − 8 = −1 (> 4, se centra) |
+
+**¿Por qué usarlo?** Porque el resultado centrado nos dice **cuánto se desvía** el número del múltiplo más cercano del divisor. Un resultado positivo significa "se pasó un poco"; uno negativo, "se quedó un poco corto". Esta información direccional es esencial para que `UseHint` sepa hacia dónde corregir.
+
 ### La operación Power2Round paso a paso
 
 **Definición (FIPS 204, Algoritmo 35):** Dado $r \in \mathbb{Z}_Q$ y $d = 13$:
 
 1. **Canonizar:** $r^+ \leftarrow r \bmod Q$ (llevar al rango $[0, Q)$)
-2. **Extraer parte baja centrada:** $r_0 \leftarrow r^+ \bmod^{\pm} 2^d$
-   Es decir, el residuo de dividir $r^+$ entre $2^{13} = 8\,192$, pero centrado en el intervalo $(-2^{12}, 2^{12}]$ en vez del habitual $[0, 2^{13})$.
+2. **Extraer parte baja centrada:** $r_0 \leftarrow r^+ \bmod^{\pm} 2^d$ (residuo centrado en $(-2^{12}, 2^{12}]$)
 3. **Calcular parte alta:** $r_1 \leftarrow (r^+ - r_0) / 2^d$
 
 La clave es que $r^+ = r_1 \cdot 2^{13} + r_0$, lo que permite reconstruir $r^+$ exactamente a partir de $r_1$ y $r_0$.
@@ -1488,7 +1523,7 @@ void polyveck_power2round(polyveck *r1, polyveck *r0, const polyveck *v) {
 | Redondeo con `+ (1 << 12)`     | Produce residuo centrado     |
 | `Power2Round` solo en `KeyGen` | No se usa en `Sign`/`Verify` |
 
-### Demostración 13: corrección y cotas de Power2Round
+### Demostración 14: corrección y cotas de Power2Round
 
 > **Identidad de reconstrucción:**
 >
@@ -1524,6 +1559,19 @@ void polyveck_power2round(polyveck *r1, polyveck *r0, const polyveck *v) {
 ---
 
 ## 4.1 Topología del anillo $\mathbb{Z}_Q$ y las franjas estables $\alpha = 2\gamma_2$
+
+### La intuición de las franjas: dividir el eje modular en regiones
+
+Imaginemos el rango $[0, Q)$ como una regla graduada de 8.380.417 marcas. `Decompose` divide esta regla en **franjas iguales** de ancho $\alpha = 2\gamma_2$. Cada franja tiene un número de zona ($r_1$) y una posición dentro de ella ($r_0$):
+
+```
+    Eje Z_Q:  0 ──────────────────────────────────────── Q-1
+              ├──── α ────┼──── α ────┼──── α ────┼─ ··· ─┤
+    Zona:         r₁=0         r₁=1        r₁=2      ...
+    Posición: ← r₀ negat.|   centro  |r₀ positivo →
+```
+
+Dado un número cualquiera en $[0, Q)$, `Decompose` te dice: *"Estás en la zona 3, a 500 pasos del centro de esa zona"*. El firmante transmite solo el número de zona ($r_1$, los *HighBits*), ahorrando bits. El verificador usa los Hints (Tema 5) para corregir posibles errores en la zona cuando el número estaba cerca de la frontera.
 
 ### Por qué α no es potencia de 2
 
@@ -1643,7 +1691,7 @@ int32_t lowbits(int32_t a) {
 | Operador `%` en `decompose`     | Barrett genérico para $\alpha$ | $\alpha$ no es potencia de 2; datos públicos, instrucción `SDIV` tolerable |
 | Ramas en `decompose`/`use_hint` | Aritmética branchless          | Los datos de entrada son públicos (compromiso, firma), no secretos         |
 
-### Demostración 14: corrección de Decompose y tratamiento del caso frontera
+### Demostración 15: corrección de Decompose y tratamiento del caso frontera
 
 > **Caso general ($r^+ - r_0 \neq Q - 1$):**
 >
@@ -1745,7 +1793,7 @@ int32_t use_hint(int32_t h, int32_t a) {
 
 Si `h = 1`, el verificador reacciona observando su propio residuo centrado `a0`. Si `a0 > 0`, significa que el error le lanzó hacia arriba, cruzando la frontera superior; entonces ajusta sumando 1 a `a1`. Si es negativo, ajusta restando 1. Las validaciones con `M - 1` y `0` manejan la continuidad cíclica en el corner case de $\mathbb{Z}_Q$.
 
-> **Demostración 15 — La hermeticidad del Hint:**
+> **Demostración 16 — La hermeticidad del Hint:**
 >
 > **Paso 1: ¿Por qué el verificador obtiene $\mathbf{w}' = \mathbf{w} - c\mathbf{s}_2 + c\mathbf{t}_0$?**
 > $\mathbf{w}' = \mathbf{A}\mathbf{z} - c\mathbf{t}_1 2^d$. Sustituyendo $\mathbf{z} = \mathbf{y} + c\mathbf{s}_1$ y $\mathbf{t}_1 2^d = \mathbf{A}\mathbf{s}_1 + \mathbf{s}_2 - \mathbf{t}_0$:
@@ -1765,7 +1813,7 @@ Si `h = 1`, el verificador reacciona observando su propio residuo centrado `a0`.
 
 ### El coste de un hint y la restricción estricta de peso $\omega$
 
-Cada vez que el firmante debe enviar un "1" en el vector $\mathbf{h}$, está filtrando un poco de información estructural sobre las fronteras de cálculo y sobre $\mathbf{t}_0$. Además, $\mathbf{h}$ es un vector inmenso ($k \times 256$ polinomios, por dar un ejemplo, en ML-DSA-87 serían 2048 booleanos).
+Cada vez que el firmante debe enviar un "1" en el vector $\mathbf{h}$, está filtrando un poco de información estructural sobre las fronteras de cálculo y sobre $\mathbf{t}_0$. Además, $\mathbf{h}$ es un vector de $k$ polinomios de 256 coeficientes cada uno ($k \times 256$ coeficientes booleanos en total; en ML-DSA-87 serían $8 \times 256 = 2048$).
 
 Para que la serialización de este vector funcione en un sistema embebido con recursos limitados y, además, produzca firmas de **tamaño estrictamente constante**, el estándar impone una restricción draconiana: un vector de pistas **no puede tener más de $\omega$ "unos" en total.**
 
@@ -1808,19 +1856,28 @@ while (ptr < OMEGA) {
 
 Beneficios críticos del diseño en criptografía embebida:
 - Ningún paquete variará su tamaño a red en medio de un cifrado simétrico (garantiza TLS record payload padding estable): la firma siempre ocupa la misma precisa cantidad de bytes.
-- Ninguna capa superior requerirá instanciar OS allocations como `malloc` dinámico en RAM para acomodar arrays crecientes.
-- El verificador aborta validaciones algorítmicas instantáneamente en la capa semántica de desempaquetado si nota índices malformados, escudando activamente la validación temporal al núcleo profundo de montgomery y matrix arrays.
+- Ninguna capa superior necesitará usar `malloc` (asignación dinámica de memoria): todo se resuelve con arrays estáticos de tamaño conocido en compilación.
+- El verificador puede rechazar firmas malformadas inmediatamente al desempaquetar los hints (comprobando que los índices sean crecientes y no excedan $\omega$), antes de ejecutar las operaciones costosas de NTT y multiplicación matricial.
 
-> **Demostración 16 — Fiat-Shamir con Abortos y el Lema de Lyubashevsky (Rejection Sampling):**
+> **Demostración 17 — Fiat-Shamir con Abortos y Rejection Sampling:**
 >
-> Sea un esquema donde el estado algorítmico interno dependa linealmente de sumandos secretos base: $\mathbf{z} = \mathbf{y} + c\mathbf{s}_1$. 
+> **Problema de la filtración lineal:** Si el firmante publica $\mathbf{z} = \mathbf{y} + c\mathbf{s}_1$ sin restricciones, la distribución de $\mathbf{z}$ depende fuertemente del secreto $\mathbf{s}_1$. Un atacante que promedie muchas firmas obtendría $\mathbb{E}[\mathbf{z}] = \mathbb{E}[\mathbf{y}] + \mathbb{E}[c\mathbf{s}_1]$. Como $\mathbf{y}$ es uniforme y centrado en cero, $\mathbb{E}[\mathbf{y}] = \mathbf{0}$, la simple acumulación estadística revelaría la componente secreta.
 >
-> 1. **La Fuga Estadística Directa ("Statistical Leakage"):** Si publicamos rutinariamente iteraciones de $\mathbf{z}$ sin constricciones liminales, su valor esperado a lo largo de un historial masivo de capturas interceptadas revelará progresivamente $\mathbb{E}[\mathbf{z}] = \mathbb{E}[\mathbf{y}] + \mathbb{E}[c\mathbf{s}_1] = 0 + \bar{c}\mathbf{s}_1$. Un adversario con poder pasivo promedio haría el matching aditivo y recuperaría limpiamente y sin computación percutida el fragmento original secreto $\mathbf{s}_1$.
+> **El Lema de Lyubashevsky:** Para lograr que la publicación de $\mathbf{z}$ revele *cero información* sobre la clave privada (Zero-Knowledge), se aplica un filtro estocástico de rechazo.
+> La variable de enmascaramiento $\mathbf{y}$ se muestrea uniformemente a fuerza bruta en una caja hipercúbica $B_{\gamma_1} = [-\gamma_1 + 1, \gamma_1 - 1]^\ell$. 
+> Por tanto, el resultado de la suma $\mathbf{z} = \mathbf{y} + c\mathbf{s}_1$ caerá en una caja geométricamente desplazada con límites sesgados por el secreto: $c\mathbf{s}_1 + B_{\gamma_1}$.
 >
-> 2. **Ocultación Ciega mediante Rechazo Escolar (Rejection Sampling):** Definimos categóricamente que el vector interno $\mathbf{z}$ no puede sobreescribir la cota $\gamma_1 - \beta$. Como el núcleo ruido inicial $\mathbf{y}$ se muestrea uniformemente a fuerza bruta en el hipercubo base extendido $[-\gamma_1 + 1, \gamma_1 - 1]$, el vector posicional final desplazado $\mathbf{z}$ percutirá iterativamente la restricción del hipercubo perimetral. Dicho desvío tiene una tasa probable vinculada estadísticamente e identitariamente al factor asimétrico del reto $c\mathbf{s}_1$.
-> Imponiendo unilateralmente esta amputación inestocástica de lo considerado "casos asimétricos fugantes", cercenamos linealmente cualquier dispersión condicional de las colas estadísticas directas. La función resultante densa asume así en iteraciones exitosas el bloque univariante puro absoluto perfecto, limitándose temporal e idealmente independiente de combinaciones residuales originarias en la variable de clave privada $\mathbf{s}_1$. La distancia estadística asintótica entre un registro validado publicable $\mathbf{z}$ sobre una red y un genuino hiper-volcado aleatorio natural de entropía total es numéricamente igual a *cero absoluto*.
+> **Condición geométrica de Aborto:** Para que el atacante no pueda deducir el sesgo al observar los bordes de la caja desplazada, el firmante debe asegurarse de que la firma $\mathbf{z}$ solo se emite si cae en la **región de intersección (el núcleo seguro)** de *todas* las posibles cajas desplazadas, sin importar cuánto valga $c\mathbf{s}_1$.
 >
-> 3. **Caché Integral y Coste Computacional Promedio:** En los niveles estandarizados finales de ML-DSA (44 a 87), la probabilidad combinatoria en iteraciones y retenciones simultáneas de bucle algorítmico de aprobar todas las cribas del aborto determinista (el hipercubo global absoluto $\beta-\gamma_1$, la normalización compromisoria lineal $\gamma_2 - \beta$, la contada exigencia aritmética paralela de las liminales y transversales $\omega$ limitadas binariamente a la vectorización topológica final) oscila empíricamente una media teórica del $15\%$ al $25\%$ absoluto. Es decir, el runtime computacional sacrifica en silicio de 4.5 a 7 bucles abortivos puros con variables frescas pseudoaleatorias internas hasta conseguir empaquetar, exportar e imprimir serialmente el resultado a salida. Este gasto transitorio offline, de peso inapreciable a nivel interactivo precomputacional humano, constituye integralmente la mayor piedra criptográfica fundacional Post-Cuántica de las estructuras polinómicas para evadir rotaciones del algoritmo primigenio de Grover o las secuencias Shor vectoriales. $\square$
+> Sea $\beta = \tau \cdot \eta$ el valor normativo máximo posible del desplazamiento (ya que $\|c\|_1 = \tau$ y $\|\mathbf{s}_1\|_\infty \leq \eta$). El núcleo seguro independiente de la clave es:
+> $$B_{\gamma_1 - \beta} = [-(\gamma_1 - \beta), (\gamma_1 - \beta)]^\ell$$
+>
+> **Condición de aborto:** El firmante evalúa la norma infinito del vector $\mathbf{z}$:
+> $$\|\mathbf{z}\|_\infty \geq \gamma_1 - \beta$$
+> - Si se cumple: $\mathbf{z}$ ha salido del núcleo seguro. Publicarlo revelaría que la caja está desplazada en una dirección concreta, filtrando información sobre $\mathbf{s}_1$. El algoritmo **aborta**, descarta todo, genera un nuevo $\mathbf{y}$ y reintenta.
+> - Si no se cumple: $\mathbf{z}$ cae dentro del núcleo seguro. Su distribución es indistinguible de una muestra uniforme en $B_{\gamma_1 - \beta}$, independientemente de la clave privada. La distancia estadística respecto a ruido puro es cero.
+>
+> **Coste de cómputo:** Los abortos descartan empíricamente entre el 75% y el 85% de los intentos, exigiendo en media de 4 a 7 iteraciones del bucle de firma para obtener un $\mathbf{z}$ válido. Este coste es aceptable porque ocurre offline (el firmante lo paga una vez) y es independiente de los datos del mensaje. $\square$
 
 ---
 ---
@@ -2022,7 +2079,7 @@ La secuencia es clara:
 | **T2**  | `test_power2round_bounds` | Para 10 000 valores: $r_1 \in [0, 1\,023]$, $r_0 \in (-2^{12}, 2^{12}]$    | Cotas satisfechas      |
 | **T3**  | `test_decompose`          | $r_1 \cdot 2\gamma_2 + r_0 \equiv r \pmod{Q}$ para varios $r$              | Igualdad exacta        |
 | **T4**  | `test_decompose_corner`   | Para $r = Q - 1$: $r_1 = 0$                                                | Corner case correcto   |
-| **T5**  | `test_decompose_bounds`   | Para 10 000 valores: $r_1 \in [0, M-1]$, $                                 | r_0                    |
+| **T5**  | `test_decompose_bounds`   | Para 10 000 valores: $r_1 \in [0, M-1]$, $r_0 \in (-\gamma_2, \gamma_2]$   | Cotas satisfechas      |
 | **T6**  | `test_highbits_lowbits`   | `HighBits(r) × 2γ₂ + LowBits(r) ≡ r (mod Q)`                               | Igualdad exacta        |
 | **T7**  | `test_hint_roundtrip`     | `UseHint(MakeHint(z,r), r+z)` = corrección correcta                        | Reconstrucción         |
 | **T8**  | `test_hint_count`         | Total de hints activos $\leq \omega$                                       | Cota respetada         |
@@ -2035,7 +2092,7 @@ La secuencia es clara:
 
 - ~~**Fase 1:** Aritmética modular (Montgomery, Barrett, reducciones condicionales).~~ ✅
 - ~~**Fase 2:** NTT de longitud 256 sobre $\mathbb{Z}_Q$.~~ ✅
-- **Fase 3:** Polinomios, vectores y algoritmos de compresión. *(en curso)*
+- **Fase 3:** Polinomios, vectores y algoritmos de compresión. *(implementación en curso — `inc/poly.h` + `src/poly.c`)*
 - **Fase 4:** Funciones de hash (SHAKE-128/256) para la generación de matrices y masking.
 - **Fase 5:** Keygen, Sign y Verify completos según FIPS 204.
 
