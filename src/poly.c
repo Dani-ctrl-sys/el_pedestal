@@ -82,3 +82,22 @@ void poly_lowbits(poly *r, const poly *a){
     }
 }
 
+int32_t make_hint(int32_t z, int32_t r){
+    int32_t r1 = highbits(r);
+    int32_t v1 = highbits(r + z);
+
+    return (r1 != v1);
+}
+
+int32_t use_hint(int32_t h, int32_t r){
+    int32_t a1, a0;
+    decompose(&a1, &a0, r);
+
+    if (h == 0) return a1;
+
+    if (a0 > 0){
+        return (a1 == M-1) ? 0 : a1 + 1;
+    } else {
+        return (a1 == 0) ? M-1 : a1 - 1;
+    }
+}
