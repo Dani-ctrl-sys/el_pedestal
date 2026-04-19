@@ -2373,5 +2373,20 @@ Para el desarrollo de estos conceptos y la comprensión profunda de ML-DSA (espe
 
 ---
 
-*Documento de aprendizaje definitivo — Temas 1-5 | `el_pedestal` | ML-DSA bare-metal en C99 de 32 bits*
 
+
+5. **Fiat-Shamir con Abortos (Vadim Lyubashevsky):** *"Fiat-Shamir with Aborts: Applications to Lattice and Factoring-Based Signatures"* (Asiacrypt 2009).
+   - Piedra angular teórica del rechazo estocástico (Rejection Sampling) usado en el Tema 5 y de la demostración de Independencia (Zero-Knowledge) por superposición en el Tema 7.
+   - [Enlace Open Access (IACR ePrint 2009/482)](https://eprint.iacr.org/2009/482)
+
+6. **Estándar Oficial NIST FIPS 202 (SHA-3 / SHAKE):** *"SHA-3 Standard: Permutation-Based Hash and Extendable-Output Functions"*.
+   - Define matemáticamente la iteración Keccak-f[1600] del Tema 6, los bit-interleavings, y la demostración de seguridad contra colisiones de la construcción Esponja.
+   - [Enlace Open Access (PDF)](https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.202.pdf)
+
+7. **The Keccak Reference (Guido Bertoni, Joan Daemen, Michaël Peeters, Gilles Van Assche):** *"The Keccak Reference"*.
+   - El manual de diseño original de los criptógrafos creadores de SHA-3. Explica meticulosamente el flujo del Tanque y la Capacidad ($r$, $c$) y el grado algebraico de la no-linealidad $\chi$.
+   - [Enlace Open Access (Keccak Team PDF)](https://keccak.team/files/Keccak-reference-3.0.pdf)
+
+---
+
+*Documento enciclopédico de aprendizaje técnico — Temas 1-7 | `el_pedestal` | ML-DSA bare-metal en C99 de 32 bits*
