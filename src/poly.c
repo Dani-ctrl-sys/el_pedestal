@@ -101,3 +101,85 @@ int32_t use_hint(int32_t h, int32_t r){
         return (a1 == 0) ? M-1 : a1 - 1;
     }
 }
+
+unsigned int polyveck_make_hint(polyveck *h, const polyveck *z, const polyveck *r){
+    unsigned int i, j, s = 0;
+    for(i=0; i<K; i++){
+        for(j=0; j<N; j++){
+            h->vec[i].coeffs[j] = make_hint(z->vec[i].coeffs[j], r->vec[i].coeffs[j]);
+            s += h->vec[i].coeffs[j];
+        }
+    }
+    return s;
+}
+
+void polyveck_use_hint(polyveck *r1, const polyveck *h, const polyveck *r) {
+    unsigned int i, j;
+    for (i = 0; i < K; ++i) {
+        for (j = 0; j < N; ++j) {
+            r1->vec[i].coeffs[j] = use_hint(h->vec[i].coeffs[j], r->vec[i].coeffs[j]);
+        }
+    }
+}
+
+void polyveck_add(polyveck *r, const polyveck *a, const polyveck *b) {
+    unsigned int i;
+    for (i = 0; i < K; ++i) {
+        poly_add(&r->vec[i], &a->vec[i], &b->vec[i]);
+    }
+}
+
+void polyveck_sub(polyveck *r, const polyveck *a, const polyveck *b) {
+    unsigned int i;
+    for (i = 0; i < K; ++i) {
+        poly_sub(&r->vec[i], &a->vec[i], &b->vec[i]);
+    }
+}
+
+void polyveck_reduce(polyveck *v) {
+    unsigned int i;
+    for (i = 0; i < K; ++i) {
+        poly_reduce(&v->vec[i]);
+    }
+}
+
+void polyveck_caddq(polyveck *v) {
+    unsigned int i;
+    for (i = 0; i < K; ++i) {
+        poly_caddq(&v->vec[i]);
+    }
+}
+
+void polyveck_power2round(polyveck *r1, polyveck *r0, const polyveck *v) {
+    unsigned int i;
+    for (i = 0; i < K; ++i) {
+        poly_power2round(&r1->vec[i], &r0->vec[i], &v->vec[i]);
+    }
+}
+
+void polyveck_decompose(polyveck *r1, polyveck *r0, const polyveck *v) {
+    unsigned int i;
+    for (i = 0; i < K; ++i) {
+        poly_decompose(&r1->vec[i], &r0->vec[i], &v->vec[i]);
+    }
+}
+
+unsigned int polyveck_make_hint(polyveck *h, const polyveck *z, const polyveck *r) {
+    unsigned int i, j, s = 0;
+    for (i = 0; i < K; ++i) {
+        for (j = 0; j < N; ++j) {
+            h->vec[i].coeffs[j] = make_hint(z->vec[i].coeffs[j], r->vec[i].coeffs[j]);
+            s += h->vec[i].coeffs[j];
+        }
+    }
+    return s;
+}
+
+void polyveck_use_hint(polyveck *r1, const polyveck *h, const polyveck *r) {
+    unsigned int i, j;
+    for (i = 0; i < K; ++i) {
+        for (j = 0; j < N; ++j) {
+            r1->vec[i].coeffs[j] = use_hint(h->vec[i].coeffs[j], r->vec[i].coeffs[j]);
+        }
+    }
+}
