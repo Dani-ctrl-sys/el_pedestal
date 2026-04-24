@@ -20,15 +20,18 @@ BUILD_DIR := build
 SRCS    := $(wildcard $(SRC_DIR)/*.c)
 OBJS    := $(patsubst $(SRC_DIR)/%.c, $(BUILD_DIR)/%.o, $(SRCS))
 
-# Ejecutable de pruebas
-TEST_SRC  := $(TEST_DIR)/test_arith.c
-TEST_BIN  := $(BUILD_DIR)/test_arith
+# Ejecutables de pruebas
+TEST_ARITH_SRC := $(TEST_DIR)/test_arith.c
+TEST_ARITH_BIN := $(BUILD_DIR)/test_arith
+
+TEST_HASH_SRC  := $(TEST_DIR)/test_hash.c
+TEST_HASH_BIN  := $(BUILD_DIR)/test_hash
 
 # ==============================================================================
 # Reglas
 # ==============================================================================
 
-.PHONY: all test clean
+.PHONY: all clean test_arith test_hash
 
 ## all: compila los objetos de src/
 all: $(OBJS)
@@ -37,11 +40,15 @@ all: $(OBJS)
 $(BUILD_DIR)/%.o: $(SRC_DIR)/%.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-## test: compila src/ + tests/test_arith.c y ejecuta el binario
-test: $(OBJS) $(TEST_SRC) | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(OBJS) $(TEST_SRC) -o $(TEST_BIN)
-	@echo "==> Ejecutando pruebas..."
-	./$(TEST_BIN)
+test_arith: $(OBJS) $(TEST_ARITH_SRC) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(OBJS) $(TEST_ARITH_SRC) -o $(TEST_ARITH_BIN)
+	@echo "==> Ejecutando pruebas Aritmeticas..."
+	./$(TEST_ARITH_BIN)
+
+test_hash: $(OBJS) $(TEST_HASH_SRC) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(OBJS) $(TEST_HASH_SRC) -o $(TEST_HASH_BIN)
+	@echo "==> Ejecutando auditoria Keccak..."
+	./$(TEST_HASH_BIN)
 
 ## Crea el directorio build/ si no existe
 $(BUILD_DIR):
