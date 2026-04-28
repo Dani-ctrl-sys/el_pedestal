@@ -220,6 +220,7 @@ static void keccak_absorb(uint64_t s[25], unsigned int r, const uint8_t *m, size
     for (i = 0; i < r / 8; ++i) {
         s[i] ^= load64(t + 8 * i);
     }
+    KeccakF1600_StatePermute(s);
 }
 
 /* 
@@ -318,5 +319,3 @@ void shake256(uint8_t *out, size_t outlen, const uint8_t *in, size_t inlen) {
         for (size_t i = 0; i < outlen; ++i) out[i] = t[i];
     }
 }
-
-
