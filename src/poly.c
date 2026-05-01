@@ -1,4 +1,5 @@
 #include "poly.h"
+#include "fips202.h"
 
 void poly_add(poly *r, const poly *a, const poly *b) {
     for(int i=0; i<N; i++){
@@ -164,22 +165,89 @@ void polyveck_decompose(polyveck *r1, polyveck *r0, const polyveck *v) {
     }
 }
 
-unsigned int polyveck_make_hint(polyveck *h, const polyveck *z, const polyveck *r) {
-    unsigned int i, j, s = 0;
-    for (i = 0; i < K; ++i) {
-        for (j = 0; j < N; ++j) {
-            h->vec[i].coeffs[j] = make_hint(z->vec[i].coeffs[j], r->vec[i].coeffs[j]);
-            s += h->vec[i].coeffs[j];
-        }
-    }
-    return s;
+/*
+ * load24_littleendian - Deserializa 3 bytes contiguos a un entero de 32 bits
+ *                       en formato little-endian.
+ *
+ * Implementación byte a byte para garantizar portabilidad en arquitecturas
+ * con restricciones de alineación de memoria (e.g. ARMv6-M, Cortex-M0).
+ * Una lectura directa de uint32_t* en memoria no alineada provocaría un
+ * HardFault en dichos procesadores.
+ *
+ * @param buf Puntero al primer byte del bloque de 3 bytes a deserializar.
+ * @return    Entero de 24 bits significativos en los bits [23:0].
+ */
+static uint32_t load24_littleendian(const uint8_t *buf) {
+    uint32_t r;
+    
+    r  = (uint32_t)buf[0];
+    r |= (uint32_t)buf[1] << 8;
+    r |= (uint32_t)buf[2] << 16;
+    
+    return r;
 }
 
-void polyveck_use_hint(polyveck *r1, const polyveck *h, const polyveck *r) {
-    unsigned int i, j;
-    for (i = 0; i < K; ++i) {
-        for (j = 0; j < N; ++j) {
-            r1->vec[i].coeffs[j] = use_hint(h->vec[i].coeffs[j], r->vec[i].coeffs[j]);
+/*
+ * poly_uniform - Genera un polinomio uniforme sobre Z_q mediante la
+ *               expansión de una semilla con SHAKE-128 (ExpandA, FIPS 204 §4.2.2).
+ *
+ * Implementa el algoritmo ExpandA descrito en FIPS 204. A partir de una semilla
+ * pública rho de 32 bytes y un nonce de 16 bits que identifica la posición (i,j)
+ * en la matriz A, deriva de forma determinista un polinomio a ∈ R_q con
+ * coeficientes distribuidos uniformemente en [0, q-1].
+ *
+ * El nonce se serializa en los bytes 32-33 del bloque de entrada a la esponja
+ * en formato little-endian, garantizando que cada posición (i,j) de la matriz
+ * produzca un polinomio estadísticamente independiente.
+ *
+ * El muestreo se realiza mediante Rejection Sampling sobre bloques de
+ * SHAKE128_RATE (168) bytes: se extraen candidatos de 24 bits y se descartan
+ * aquellos fuera del rango [0, q-1], asegurando una distribución exactamente
+ * uniforme sin sesgo de reducción modular.
+ *
+ * @param a     Polinomio de salida.
+ * @param seed  Semilla pública rho de 32 bytes.
+ * @param nonce Identificador de posición (i << 8 | j) para la matriz A.
+ */
+void poly_uniform(poly *a, const uint8_t seed[32], uint16_t nonce) {
+    /* Construcción del bloque de entrada: rho || nonce (34 bytes en total). */
+    uint8_t in[34];
+    for(int i = 0; i < 32; i++) {
+        in[i] = seed[i];
+    }
+    in[32] = nonce & 0xFF;  /* Byte bajo del nonce. */
+    in[33] = nonce >> 8;    /* Byte alto del nonce. */
+    
+    /* Inicialización y absorción en la esponja SHAKE-128. */
+    keccak_state state;
+    shake128_absorb(&state, in, 34);
+
+    int ctr = 0;
+    uint8_t buf[SHAKE128_RATE];
+    
+    /*
+     * Bucle de exprimido: extrae bloques de SHAKE128_RATE bytes hasta completar
+     * los N coeficientes válidos del polinomio.
+     */
+    while (ctr < N) {
+        shake128_squeezeblocks(buf, 1, &state);
+        
+        int pos = 0;
+        
+        /*
+         * Rejection Sampling: procesa el bloque actual en grupos de 3 bytes.
+         * Se descarta cualquier candidato z >= q para garantizar uniformidad.
+         * Los bytes residuales al final del bloque (< 3) se ignoran.
+         */
+        while (ctr < N && pos + 3 <= SHAKE128_RATE) {
+            uint32_t z = load24_littleendian(&buf[pos]);
+            
+            if (z < Q) {
+                a->coeffs[ctr] = z;
+                ctr++;
+            }
+            
+            pos += 3;
         }
     }
 }

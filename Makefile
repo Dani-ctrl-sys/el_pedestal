@@ -27,11 +27,14 @@ TEST_ARITH_BIN := $(BUILD_DIR)/test_arith
 TEST_HASH_SRC  := $(TEST_DIR)/test_hash.c
 TEST_HASH_BIN  := $(BUILD_DIR)/test_hash
 
+TEST_POLY_SRC  := $(TEST_DIR)/test_poly.c
+TEST_POLY_BIN  := $(BUILD_DIR)/test_poly
+
 # ==============================================================================
 # Reglas
 # ==============================================================================
 
-.PHONY: all clean test_arith test_hash
+.PHONY: all clean test_arith test_hash test_poly
 
 ## all: compila los objetos de src/
 all: $(OBJS)
@@ -47,8 +50,13 @@ test_arith: $(OBJS) $(TEST_ARITH_SRC) | $(BUILD_DIR)
 
 test_hash: $(OBJS) $(TEST_HASH_SRC) | $(BUILD_DIR)
 	$(CC) $(CFLAGS) $(OBJS) $(TEST_HASH_SRC) -o $(TEST_HASH_BIN)
-	@echo "==> Ejecutando auditoria Keccak..."
+	@echo \"==> Ejecutando auditoria Keccak...\"
 	./$(TEST_HASH_BIN)
+
+test_poly: $(OBJS) $(TEST_POLY_SRC) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(OBJS) $(TEST_POLY_SRC) -o $(TEST_POLY_BIN)
+	@echo \"==> Ejecutando test de Polinomios Uniformes...\"
+	./$(TEST_POLY_BIN)
 
 ## Crea el directorio build/ si no existe
 $(BUILD_DIR):

@@ -55,6 +55,7 @@ void poly_add(poly *r, const poly *a, const poly *b);
 void poly_sub(poly *r, const poly *a, const poly *b);
 void poly_reduce(poly *a);
 void poly_caddq(poly *a);
+void poly_uniform(poly *a, const uint8_t seed[32], uint16_t nonce);
 
 /* === Descomposición y compresión === */
 void power2round(int32_t *r1, int32_t *r0, int32_t a);
