@@ -237,11 +237,19 @@ static void keccak_squeezeblocks(uint8_t *out, size_t nblocks, unsigned int r, u
         }
         out += r;
         --nblocks;
-        
-        // Si seguimos necesitando más bloques, volvemos a exprimir (permutar)
-        if (nblocks > 0) {
-            KeccakF1600_StatePermute(s);
-        }
+
+        /*
+         * Permutación incondicional tras cada bloque volcado.
+         *
+         * Invariante: cuando squeezeblocks retorna, el estado contiene
+         * el SIGUIENTE bloque listo para ser extraído en la próxima
+         * llamada. Sin esto, llamadas sucesivas squeezeblocks(1) sobre
+         * el mismo estado producen el mismo bloque indefinidamente.
+         *
+         * Nota: la permutación "extra" al final de la última llamada es
+         * el coste mínimo por mantener un contrato de API correcto.
+         */
+        KeccakF1600_StatePermute(s);
     }
 }
 

@@ -1,5 +1,6 @@
 #include "poly.h"
 #include "fips202.h"
+#include "ntt.h"
 
 void poly_add(poly *r, const poly *a, const poly *b) {
     for(int i=0; i<N; i++){
@@ -249,5 +250,124 @@ void poly_uniform(poly *a, const uint8_t seed[32], uint16_t nonce) {
             
             pos += 3;
         }
+    }
+}
+
+/*
+ * poly_make_hint - Calcula el vector de hints para un polinomio.
+ *
+ * Para cada coeficiente i, determina si el hint es necesario comparando
+ * HighBits(r[i]) con HighBits(r[i] + z[i]).
+ *
+ * Referencia escalar: make_hint(z, r)  →  línea 86 de este archivo.
+ * Referencia vectorial: polyveck_make_hint  →  línea 106 de este archivo.
+ *
+ * @param h  Polinomio de salida: h[i] = 0 ó 1.
+ * @param z  Polinomio de corrección (low-order part del error).
+ * @param r  Polinomio base.
+ * @return   Número total de hints activos (sum de h[i]).
+ */
+unsigned int poly_make_hint(poly *h, const poly *z, const poly *r) {
+    int s = 0;
+    for(int j=0; j<N; j++){
+        h->coeffs[j] = make_hint(z->coeffs[j], r->coeffs[j]);
+        s += h->coeffs[j];
+    }
+    return s;
+}
+
+/*
+ * poly_use_hint - Corrige los HighBits de un polinomio usando los hints.
+ *
+ * Para cada coeficiente i, aplica UseHint(h[i], r[i]) para recuperar
+ * el valor correcto de r1 sin necesidad de conocer z.
+ *
+ * Referencia escalar: use_hint(h, r)  →  línea 93 de este archivo.
+ *
+ * @param r1  Polinomio de salida: coeficientes corregidos (HighBits).
+ * @param h   Polinomio de hints.
+ * @param r   Polinomio original.
+ */
+void poly_use_hint(poly *r1, const poly *h, const poly *r) {
+    for(int j=0; j<N; j++){
+        r1->coeffs[j] = use_hint(h->coeffs[j], r->coeffs[j]);
+    }
+}
+
+/*
+ * polyvecl_ntt - Aplica la NTT in-place a todos los L polinomios del vector.
+ *
+ * Transforma cada polinomio de R_q al dominio NTT para permitir la
+ * multiplicación punto a punto en O(N) en lugar de convolución en O(N²).
+ * Prerequisito: los coeficientes de entrada deben estar en forma reducida.
+ *
+ * @param v Vector de L polinomios a transformar.
+ */
+void polyvecl_ntt(polyvecl *v) {
+    unsigned int i;
+    for(i=0; i<L; i++){
+        poly_ntt(v->vec[i].coeffs);
+    }
+}
+
+/*
+ * polyvecl_invntt - Aplica la NTT inversa in-place a todos los L polinomios del vector.
+ *
+ * Transforma cada polinomio del dominio NTT de vuelta a R_q. Incluye el
+ * factor de escala N^{-1} mod q absorbido en la tabla de zetas inversos.
+ *
+ * @param v Vector de L polinomios a transformar.
+ */
+void polyvecl_invntt(polyvecl *v) {
+    unsigned int i;
+    for(i=0; i<L; i++){
+        poly_invntt(v->vec[i].coeffs);
+    }
+}
+
+/*
+ * polyveck_ntt - Aplica la NTT in-place a todos los K polinomios del vector.
+ *
+ * @param v Vector de K polinomios a transformar.
+ */
+void polyveck_ntt(polyveck *v) {
+    unsigned int i;
+    for(i=0; i<K; i++){
+        poly_ntt(v->vec[i].coeffs);
+    }
+}
+
+/*
+ * polyveck_invntt - Aplica la NTT inversa in-place a todos los K polinomios del vector.
+ *
+ * @param v Vector de K polinomios a transformar.
+ */
+void polyveck_invntt(polyveck *v) {
+    unsigned int i;
+    for(i=0; i<K; i++){
+        poly_invntt(v->vec[i].coeffs);
+    }
+}
+
+/*
+ * polyvecl_pointwise_acc - Producto punto acumulado en dominio NTT (FIPS 204 §4).
+ *
+ * Computa r = sum_{i=0}^{L-1} a[i] ⊙ b.vec[i] en dominio NTT, donde ⊙
+ * denota la multiplicación coeficiente a coeficiente (poly_mul_pointwise).
+ * Equivale a una fila del producto matricial A·s en la generación de claves.
+ *
+ * Precondición: a[0..L-1] y b->vec[0..L-1] deben estar en dominio NTT.
+ * Postcondición: r contiene el producto punto en dominio NTT, sin reducir.
+ *
+ * @param r  Polinomio de salida: acumulador del producto punto.
+ * @param a  Fila de la matriz A: array de L polinomios en dominio NTT.
+ * @param b  Vector columna s: polyvecl de L polinomios en dominio NTT.
+ */
+void polyvecl_pointwise_acc(poly *r, const poly *a, const polyvecl *b) {
+    poly tmp;
+    poly_mul_pointwise(r->coeffs, a[0].coeffs, b->vec[0].coeffs);
+    for(unsigned int i=1; i<L; i++){
+        poly_mul_pointwise(tmp.coeffs, a[i].coeffs, b->vec[i].coeffs);
+        poly_add(r, r, &tmp);
     }
 }
