@@ -371,3 +371,200 @@ void polyvecl_pointwise_acc(poly *r, const poly *a, const polyvecl *b) {
         poly_add(r, r, &tmp);
     }
 }
+
+/* ==========================================================================
+ * MINITAREA 4.1 — Norma infinita (branch-free)
+ *
+ * Objetivo: determinar si un polinomio o vector supera el umbral B.
+ *           Es el "semáforo" del bucle de abort en Sign.
+ *
+ * Matemática:
+ *   ||a||∞ = max_i |a_i|
+ *   Retorna 1 (fallo) si algún |a_i| >= B, 0 (ok) si todos < B.
+ *
+ * PISTA — Valor absoluto en constant-time (sin if/branch):
+ *   int32_t t = x >> 31;       <- máscara: 0x00000000 si x>=0,
+ *                                           0xFFFFFFFF si x<0
+ *   t = x - (t & (2 * x));    <- si x<0: x - 2x = -x
+ *                                  si x>=0: x - 0  = x
+ *
+ * PISTA — ¿Por qué branch-free?
+ *   Los coeficientes de z = y + c·s1 son material secreto durante Sign.
+ *   Un branch sobre ellos filtraría información por timing side-channel.
+ *
+ * Referencia FIPS 204: Algorithm 2 (Sign), paso de comprobación de ||z||∞.
+ * ========================================================================== */
+
+/*
+ * poly_chknorm - Comprueba si la norma infinita de a supera el umbral B.
+ *
+ * @param a  Polinomio a auditar.
+ * @param B  Umbral de norma (B < Q/2).
+ * @return   1 si ||a||∞ >= B (fallo/abort), 0 si ||a||∞ < B (ok).
+ */
+int poly_chknorm(const poly *a, int32_t B) {
+    int32_t t;
+    int32_t abs_x;
+    int32_t ret=0;
+
+    for(int i=0; i<N; i++){
+        int32_t x = a->coeffs[i];
+        t = x>>31;
+        abs_x = x - (t & (2*x));
+        t = (B - 1 - abs_x) >> 31;
+        ret |= t;
+    }
+    
+    return ret & 1;
+    
+}
+
+/*
+ * polyvecl_chknorm - Versión vectorial: audita los L polinomios de v.
+ *
+ * @param v  Vector de L polinomios.
+ * @param B  Umbral de norma.
+ * @return   1 si algún ||v[i]||∞ >= B, 0 si todos están dentro.
+ */
+int polyvecl_chknorm(const polyvecl *v, int32_t B) {
+    int ret = 0;
+    for(int i=0; i<L; i++){
+        ret |= poly_chknorm(&v->vec[i], B);
+    }
+    return ret;
+}
+
+/* ==========================================================================
+ * Muestreo de la Distribución Binomial (ExpandS)
+ *
+ * Expande una semilla criptográfica de 64 bytes (rho') mediante SHAKE-256 
+ * para muestrear un polinomio con coeficientes en la distribución centrada 
+ * limitada por ETA.
+ *
+ * Implementa el Algoritmo 32 (ExpandS) de FIPS 204.
+ * Para ETA=2, se extraen bloques de 4 bits, aplicando Rejection Sampling
+ * para descartar valores >= 15 y asegurar una distribución estadísticamente
+ * idéntica a la norma.
+ * ========================================================================== */
+
+/*
+ * poly_uniform_eta - Genera un polinomio con coeficientes en [-ETA, ETA]
+ *
+ * @param a      Polinomio de salida
+ * @param seed   Semilla secreta (rho') de 64 bytes
+ * @param nonce  Identificador para el stream (normalmente se suma la posición en el vector)
+ */
+void poly_uniform_eta(poly *a, const uint8_t seed[64], uint16_t nonce) {
+    uint8_t in[66]; // 64 bytes de semilla + 2 bytes de nonce
+    int i;
+
+    // 1. Preparar el buffer `in` con la semilla y el nonce (en little-endian).
+    // TODO: Copia los 64 bytes de seed a in, y pon nonce en in[64] e in[65].
+    for(i=0; i<64; i++){
+        in[i] = seed[i];
+    }
+
+    in[64] = (uint8_t) nonce;
+    in[65] = (uint8_t) (nonce >> 8);
+
+    // 2. Inicializar la esponja SHAKE-256
+    keccak_state state;
+    shake256_absorb(&state, in, 66);
+
+    // 3. Extraer bloques y aplicar rejection sampling
+    uint8_t buf[SHAKE256_RATE];
+    int ctr = 0; // Coeficientes válidos encontrados
+    uint8_t t0, t1;
+
+    while (ctr < N) {
+        shake256_squeezeblocks(buf, 1, &state);
+
+        for(i=0; i<SHAKE256_RATE && ctr<N; i++){
+            t0 = buf[i] & 0x0F;
+
+            if(t0<15){
+                a->coeffs[ctr++] = 2 - (t0 % 5);
+            }
+
+            if(ctr < N){
+                t1= buf[i] >> 4;
+                if(t1<15){
+                    a->coeffs[ctr++] = 2 - (t1 % 5);
+                }
+            }
+        }
+    }
+}
+
+/* ==========================================================================
+ * Muestreo de Máscara Uniforme (ExpandMask)
+ *
+ * Expande una semilla secreta de 64 bytes (rho') y un nonce de 16 bits
+ * empleando SHAKE-256 para generar el vector de máscara y.
+ *
+ * Implementa el Algoritmo 33 (ExpandMask) de FIPS 204.
+ * El desempaquetado (bitunpack) extrae bits de forma contigua para preservar
+ * el determinismo del flujo SHAKE. Para DILITHIUM_MODE=2 (GAMMA1 = 2^17), 
+ * mapea bloques de 72 bits a 4 coeficientes de 18 bits, sin descartar
+ * entropía residual.
+ * ========================================================================== */
+
+/*
+ * poly_uniform_gamma1 - Genera un polinomio con coeficientes en [-GAMMA1, GAMMA1]
+ *
+ * @param a      Polinomio de salida
+ * @param seed   Semilla secreta (rho') de 64 bytes
+ * @param nonce  Identificador para el stream
+ */
+void poly_uniform_gamma1(poly *a, const uint8_t seed[64], uint16_t nonce) {
+    uint8_t in[66];
+    int i;
+    
+    // 1. Preparar buffer (igual que poly_uniform_eta)
+    for(i=0; i<64; i++) {
+        in[i] = seed[i];
+    }
+    in[64] = (uint8_t) nonce;
+    in[65] = (uint8_t) (nonce >> 8);
+
+    // 2. SHAKE-256 (ExpandMask usa SHAKE-256)
+    keccak_state state;
+    shake256_absorb(&state, in, 66);
+
+    uint8_t buf[SHAKE256_RATE];
+    int ctr = 0; // Coeficientes encontrados
+    int pos = 0; // Posición dentro del bloque buf
+
+    // Vamos a exprimir bloques hasta tener los N coeficientes
+    while (ctr < N) {
+        shake256_squeezeblocks(buf, 1, &state);
+        pos = 0;
+        uint32_t z0, z1, z2, z3;
+
+        // Procesamos bloques de 9 bytes para sacar 4 coeficientes de 18 bits
+        while (pos + 9 <= SHAKE256_RATE && ctr < N) {
+            z0 = (uint32_t)buf[pos];
+            z0 |= (uint32_t)buf[pos+1] << 8;
+            z0 |= (uint32_t)(buf[pos+2] & 0x03) << 16;
+            
+            z1 = (uint32_t)(buf[pos+2] >> 2);
+            z1 |= (uint32_t)buf[pos+3] << 6;
+            z1 |= (uint32_t)(buf[pos+4] & 0x0F) << 14;
+            
+            z2 = (uint32_t)(buf[pos+4] >> 4);
+            z2 |= (uint32_t)buf[pos+5] << 4;
+            z2 |= (uint32_t)(buf[pos+6] & 0x3F) << 12;
+            
+            z3 = (uint32_t)(buf[pos+6] >> 6);
+            z3 |= (uint32_t)buf[pos+7] << 2;
+            z3 |= (uint32_t)buf[pos+8] << 10;
+
+            a->coeffs[ctr++] = (int32_t)GAMMA1 - (int32_t)z0;
+            if (ctr < N) a->coeffs[ctr++] = (int32_t)GAMMA1 - (int32_t)z1;
+            if (ctr < N) a->coeffs[ctr++] = (int32_t)GAMMA1 - (int32_t)z2;
+            if (ctr < N) a->coeffs[ctr++] = (int32_t)GAMMA1 - (int32_t)z3;
+            
+            pos += 9;
+        }
+    }
+}

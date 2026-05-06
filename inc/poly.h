@@ -56,6 +56,8 @@ void poly_sub(poly *r, const poly *a, const poly *b);
 void poly_reduce(poly *a);
 void poly_caddq(poly *a);
 void poly_uniform(poly *a, const uint8_t seed[32], uint16_t nonce);
+void poly_uniform_eta(poly *a, const uint8_t seed[64], uint16_t nonce);
+void poly_uniform_gamma1(poly *a, const uint8_t seed[64], uint16_t nonce);
 
 /* === Descomposición y compresión === */
 void power2round(int32_t *r1, int32_t *r0, int32_t a);
@@ -73,6 +75,10 @@ int32_t make_hint(int32_t z, int32_t r);
 int32_t use_hint(int32_t h, int32_t r);
 unsigned int poly_make_hint(poly *h, const poly *z, const poly *r);
 void poly_use_hint(poly *r1, const poly *h, const poly *r);
+
+/* === Norma infinita === */
+int poly_chknorm(const poly *a, int32_t B);
+int polyvecl_chknorm(const polyvecl *v, int32_t B);
 
 /* === Vectores de polinomios === */
 void polyvecl_ntt(polyvecl *v);
