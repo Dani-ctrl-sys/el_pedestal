@@ -568,3 +568,50 @@ void poly_uniform_gamma1(poly *a, const uint8_t seed[64], uint16_t nonce) {
         }
     }
 }
+
+/* ==========================================================================
+ * MINITAREA 4.2 — Norma Infinita Vectorial (Dimensión K)
+ * ========================================================================== */
+int polyveck_chknorm(const polyveck *v, int32_t B) {
+    int ret = 0;
+    for(int i = 0; i < K; i++){
+        ret |= poly_chknorm(&v->vec[i], B);
+    }
+    return ret;
+}
+
+/* ==========================================================================
+ * MINITAREA 4.3 — Desplazamiento Lógico (poly_shiftl)
+ * ========================================================================== */
+void poly_shiftl(poly *a) {
+    for(int i = 0; i < N; i++){
+        a->coeffs[i] <<= D;
+    }
+}
+
+/* ==========================================================================
+ * MINITAREA 4.4 — Envolturas de Expansión Vectorial
+ * ========================================================================== */
+void polyvecl_uniform_eta(polyvecl *v, const uint8_t seed[64], uint16_t nonce) {
+    for(int i = 0; i < L; i++){
+        poly_uniform_eta(&v->vec[i], seed, nonce + i);
+    }
+}
+
+void polyveck_uniform_eta(polyveck *v, const uint8_t seed[64], uint16_t nonce) {
+    for(int i = 0; i < K; i++){
+        poly_uniform_eta(&v->vec[i], seed, nonce + i);
+    }
+}
+
+/* ==========================================================================
+ * MINITAREA 4.5 — Generador de la Matriz Pública A
+ * ========================================================================== */
+void polyvec_matrix_expand(polyvecl mat[K], const uint8_t rho[32]) {
+    for(int i = 0; i < K; i++){
+        for(int j = 0; j < L; j++){
+            /* El nonce se forma con (fila << 8) + columna, según FIPS 204 */
+            poly_uniform(&mat[i].vec[j], rho, (i << 8) + j);
+        }
+    }
+}

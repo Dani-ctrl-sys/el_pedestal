@@ -53,11 +53,16 @@ typedef struct { poly vec[K]; }       polyveck;
 /* === Aritmética de polinomios === */
 void poly_add(poly *r, const poly *a, const poly *b);
 void poly_sub(poly *r, const poly *a, const poly *b);
+void poly_shiftl(poly *a);
 void poly_reduce(poly *a);
 void poly_caddq(poly *a);
 void poly_uniform(poly *a, const uint8_t seed[32], uint16_t nonce);
 void poly_uniform_eta(poly *a, const uint8_t seed[64], uint16_t nonce);
 void poly_uniform_gamma1(poly *a, const uint8_t seed[64], uint16_t nonce);
+void polyvecl_uniform_eta(polyvecl *v, const uint8_t seed[64], uint16_t nonce);
+void polyveck_uniform_eta(polyveck *v, const uint8_t seed[64], uint16_t nonce);
+void polyvecl_uniform_gamma1(polyvecl *v, const uint8_t seed[64], uint16_t nonce);
+void polyvec_matrix_expand(polyvecl mat[K], const uint8_t rho[32]);
 
 /* === Descomposición y compresión === */
 void power2round(int32_t *r1, int32_t *r0, int32_t a);
@@ -79,13 +84,14 @@ void poly_use_hint(poly *r1, const poly *h, const poly *r);
 /* === Norma infinita === */
 int poly_chknorm(const poly *a, int32_t B);
 int polyvecl_chknorm(const polyvecl *v, int32_t B);
+int polyveck_chknorm(const polyveck *v, int32_t B);
 
 /* === Vectores de polinomios === */
 void polyvecl_ntt(polyvecl *v);
 void polyvecl_invntt(polyvecl *v);
 void polyveck_ntt(polyveck *v);
 void polyveck_invntt(polyveck *v);
-void polyvecl_pointwise_acc(poly *r, const poly *a, const polyvecl *b);
+void polyvecl_pointwise_acc(poly *r, const polyvecl *a, const polyvecl *b);
 
 void polyveck_add(polyveck *r, const polyveck *a, const polyveck *b);
 void polyveck_sub(polyveck *r, const polyveck *a, const polyveck *b);
