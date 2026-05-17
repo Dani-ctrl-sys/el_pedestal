@@ -36,7 +36,9 @@ void unpack_sk(uint8_t rho[32], uint8_t K_key[32], uint8_t tr[64],
                const uint8_t *sk);
 
 void polyz_pack(uint8_t *r, const poly *a);
+void polyz_unpack(poly *r, const uint8_t *a);
 void polyveck_pack_w1(uint8_t *r, const polyveck *v);
 void pack_sig(uint8_t *sig, const uint8_t c[32], const polyvecl *z, const polyveck *h);
+int unpack_sig(uint8_t c[32], polyvecl *z, polyveck *h, const uint8_t *sig);
 
 #endif /* PACKING_H */

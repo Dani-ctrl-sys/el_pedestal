@@ -615,3 +615,14 @@ void polyvec_matrix_expand(polyvecl mat[K], const uint8_t rho[32]) {
         }
     }
 }
+
+/**
+ * @brief Multiplica un polinomio por 2^D.
+ *
+ * Simplemente desplaza todos los coeficientes D posiciones a la izquierda.
+ */
+void poly_shiftl(poly *a) {
+    for(int i = 0; i < N; i++) {
+        a->coeffs[i] <<= D;
+    }
+}

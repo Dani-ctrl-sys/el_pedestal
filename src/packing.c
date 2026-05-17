@@ -285,6 +285,74 @@ void pack_sig(uint8_t *sig, const uint8_t c[32], const polyvecl *z, const polyve
     }
 }
 
+/**
+ * @brief Desempaqueta un polinomio z (18 bits por coeficiente).
+ */
+void polyz_unpack(poly *r, const uint8_t *a) {
+    uint32_t t[4];
+    for(int i = 0; i < N/4; i++) {
+        // Deserialización de 4 coeficientes a partir de bloques de 9 bytes
+        t[0] = (a[9*i+0] >> 0) | ((uint32_t)a[9*i+1] << 8) | ((uint32_t)a[9*i+2] << 16);
+        t[0] &= 0x3FFFF;
+        t[1] = (a[9*i+2] >> 2) | ((uint32_t)a[9*i+3] << 6) | ((uint32_t)a[9*i+4] << 14);
+        t[1] &= 0x3FFFF;
+        t[2] = (a[9*i+4] >> 4) | ((uint32_t)a[9*i+5] << 4) | ((uint32_t)a[9*i+6] << 12);
+        t[2] &= 0x3FFFF;
+        t[3] = (a[9*i+6] >> 6) | ((uint32_t)a[9*i+7] << 2) | ((uint32_t)a[9*i+8] << 10);
+        t[3] &= 0x3FFFF;
+
+        r->coeffs[4*i+0] = GAMMA1 - t[0];
+        r->coeffs[4*i+1] = GAMMA1 - t[1];
+        r->coeffs[4*i+2] = GAMMA1 - t[2];
+        r->coeffs[4*i+3] = GAMMA1 - t[3];
+    }
+}
+
+/**
+ * @brief Deserializa una firma completa: c (32) || z (L*576) || h (84).
+ */
+int unpack_sig(uint8_t c[32], polyvecl *z, polyveck *h, const uint8_t *sig) {
+    unsigned int i, j, k;
+    
+    // Extracción del reto criptográfico c (32 bytes)
+    for(i=0; i<32; i++){
+        c[i] = sig[i];
+    }
+    sig += 32;
+
+    // Deserialización del vector de respuesta z
+    for(i=0; i<L; i++){
+        polyz_unpack(&z->vec[i], sig + i * POLYZ_PACKEDBYTES);
+    }
+    sig += L * POLYZ_PACKEDBYTES;
+
+    // Reconstrucción del vector de pistas (hints)
+    for(i = 0; i < K; i++){
+        for(j = 0; j < N; j++){
+            h->vec[i].coeffs[j] = 0;
+        }
+    }
+
+    k = 0; 
+    for(i = 0; i < K; i++){
+        if(sig[OMEGA + i] < k || sig[OMEGA + i] > OMEGA) return -1;
+
+        for(j = k; j < sig[OMEGA + i]; j++){
+            uint8_t idx = sig[j]; 
+            h->vec[i].coeffs[idx] = 1;
+        }
+
+        k = sig[OMEGA + i];
+    }
+
+    // Validación de bytes de relleno (padding)
+    for(j = k; j < OMEGA; j++) {
+        if(sig[j] != 0) return -1;
+    }
+    
+    return 0;
+}
+
 /* Empaqueta la parte alta w1 (6 bits por coeficiente para Modo 2) */
 void polyw1_pack(uint8_t *r, const poly *a) {
     for(int i = 0; i < N/4; i++) {

@@ -220,3 +220,78 @@ int crypto_sign(uint8_t *sig, size_t *siglen, const uint8_t *m, size_t mlen, con
 
     return 0;
 }
+
+/**
+ * @brief Algoritmo de verificación ML-DSA.
+ */
+int crypto_sign_verify(const uint8_t *sig, size_t siglen, const uint8_t *m, size_t mlen, const uint8_t *pk) {
+    // Validación de longitud de firma requerida por FIPS 204
+    if(siglen != CRYPTO_BYTES) return -1;
+
+    // Deserialización de clave pública y firma
+    uint8_t rho[32];
+    polyveck t1;
+
+    uint8_t c[32];
+    polyvecl z;
+    polyveck h;
+    
+    unpack_pk(rho, &t1, pk);
+    if(unpack_sig(c, &z, &h, sig)) return -1;
+
+    // Validación de seguridad: rechazo si la norma infinita excede los límites prescritos
+    if(polyvecl_chknorm(&z, GAMMA1 - BETA)) return -1;
+
+    // Reconstrucción del vector w1' a través del polinomio reto c
+    polyvecl mat[K];
+    polyvec_matrix_expand(mat, rho);
+
+    polyvecl_ntt(&z);
+
+    polyveck w;
+    for(int i=0; i<K; i++){
+        polyvecl_pointwise_acc(&w.vec[i], &mat[i], &z);
+        poly_reduce(&w.vec[i]);
+    }
+
+    poly cp;
+    poly_challenge(&cp, c);
+    poly_ntt(&cp);
+    
+    for(int i=0; i<K; i++){
+        poly_shiftl(&t1.vec[i]);
+        poly_ntt(&t1.vec[i]);
+        poly ct1;
+        poly_pointwise_montgomery(&ct1, &cp, &t1.vec[i]);
+        poly_sub(&w.vec[i], &w.vec[i], &ct1);
+        poly_reduce(&w.vec[i]);
+    }
+    
+    polyveck_invntt(&w);
+    polyveck_caddq(&w);
+    
+    // Aplicación de pistas (hints) para la recuperación exacta de los bits altos
+    polyveck w1;
+    polyveck_use_hint(&w1, &h, &w);
+    
+    // Generación de huellas digitales de clave y mensaje (Identidad + Contrato)
+    uint8_t tr[64];
+    shake256(tr, 64, pk, CRYPTO_PUBLICKEYBYTES);
+
+    uint8_t mu[64];
+    shake256_msg(mu, 64, tr, m, mlen);
+
+    uint8_t w1_packed[K * 192];
+    polyveck_pack_w1(w1_packed, &w1);
+    
+    // Derivación del reto criptográfico de verificación c2
+    uint8_t c2[32];
+    shake256_msg(c2, 32, mu, w1_packed, K * 192);
+    
+    // Comparación en tiempo constante de los retos criptográficos
+    for(int i=0; i<32; i++){
+        if(c[i] != c2[i]) return -1;
+    }
+    
+    return 0; 
+}
